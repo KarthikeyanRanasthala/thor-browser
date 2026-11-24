@@ -106,6 +106,12 @@ struct DisplayListPlayerThorVG::Impl {
     DrawnFonts const* fonts {};
     DrawnImageFrames const* images {};
     HashMap<unsigned, unsigned> skipped;
+    CurrentVideoFrame current_video_frame;
+    // Replays for several damaged tiles can request the same frame. Cache its converted pixels
+    // by frame identity, releasing the decoder storage as soon as conversion is complete.
+    std::unique_ptr<tvg::Picture, decltype(&tvg::Paint::rel)> video_picture { nullptr, &tvg::Paint::rel };
+    u64 video_frame_id {};
+    SkRect video_source_rect {};
     unsigned glyphs_painted {};
     HashTable<unsigned> reported_skips;
     bool reported_text {};
@@ -215,31 +221,66 @@ struct DisplayListPlayerThorVG::Impl {
         path(SkPath::Rect(Gfx::to_skia_rect(r)), color, state.matrix.asM33(), 0, tvg::StrokeCap::Butt, tvg::StrokeJoin::Miter, 4, blend);
     }
 
-    void pixels(u32 const* data, size_t pitch, int w, int h, tvg::ColorSpace format, SkRect src, SkRect dst)
+    static tvg::Picture* copy_picture(u32 const* data, size_t pitch, SkIRect area, tvg::ColorSpace format)
     {
-        if (state.hidden || src.isEmpty() || dst.isEmpty() || !data || !SkRect::MakeIWH(w, h).contains(src))
-            return;
-        // Images can outlive the callback during batched replay. Give ThorVG a private,
-        // tightly packed copy of just the sampled part (including fractional edge pixels).
-        auto area = src.roundOut();
         auto* copy = static_cast<u32*>(calloc(static_cast<size_t>(area.width()) * area.height(), sizeof(u32)));
         if (!copy)
-            return;
+            return nullptr;
         for (int y = 0; y < area.height(); ++y)
             memcpy(copy + static_cast<size_t>(y) * area.width(), data + (area.y() + y) * pitch + area.x(), area.width() * sizeof(u32));
         auto* image = tvg::Picture::gen();
         if (image->load(copy, area.width(), area.width(), area.height(), format, false) != tvg::Result::Success) {
             free(copy);
             tvg::Paint::rel(image);
-            return;
+            return nullptr;
         }
+        return image;
+    }
+
+    void draw_picture(tvg::Paint* image, SkRect src, SkRect dst)
+    {
         group();
         clip(SkPath::Rect(dst));
         auto m = state.matrix.asM33();
-        src.offset(-area.x(), -area.y());
         m.preConcat(SkMatrix::RectToRect(src, dst));
         add(image, m);
         pop();
+    }
+
+    void pixels(u32 const* data, size_t pitch, int w, int h, tvg::ColorSpace format, SkRect src, SkRect dst)
+    {
+        if (state.hidden || src.isEmpty() || dst.isEmpty() || !data || !SkRect::MakeIWH(w, h).contains(src))
+            return;
+        auto area = src.roundOut();
+        if (auto* image = copy_picture(data, pitch, area, format)) {
+            src.offset(-area.x(), -area.y());
+            draw_picture(image, src, dst);
+        }
+    }
+
+    void draw_video(DrawVideoFrame const& command)
+    {
+        if (!current_video_frame || command.dst_rect.is_empty())
+            return;
+        auto frame = current_video_frame(command.video_sink_handle);
+        if (!frame)
+            return;
+        if (!video_picture || frame->id() != video_frame_id) {
+            auto pixels = frame->to_bitmap();
+            if (pixels.is_error())
+                return;
+            auto const& bitmap = *pixels.value();
+            auto area = SkIRect::MakeWH(min(frame->width(), static_cast<u32>(bitmap.width())), min(frame->height(), static_cast<u32>(bitmap.height())));
+            if (area.isEmpty())
+                return;
+            video_picture.reset(copy_picture(bitmap.begin(), bitmap.pitch() / 4, area, pixel_format(bitmap.format(), bitmap.alpha_type())));
+            if (!video_picture)
+                return;
+            video_source_rect = SkRect::Make(area);
+            video_frame_id = frame->id();
+        }
+        video_picture->filter(command.scaling_mode == Gfx::ScalingMode::NearestNeighbor ? tvg::FilterMethod::Nearest : tvg::FilterMethod::Bilinear);
+        draw_picture(video_picture->duplicate(), video_source_rect, Gfx::to_skia_rect(command.dst_rect));
     }
 
     void surface(Gfx::PaintingSurface const& surface, SkRect src, SkRect dst)
@@ -397,6 +438,9 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
         path(ring.detach(), c.color, m);
         return;
     }
+    case DisplayListCommandType::DrawVideoFrame:
+        draw_video(read.operator()<DrawVideoFrame>());
+        return;
     case DisplayListCommandType::DrawScaledDecodedImageFrame: {
         if (!images)
             break;
@@ -505,17 +549,19 @@ DisplayListPlayerThorVG::DisplayListPlayerThorVG()
 }
 DisplayListPlayerThorVG::~DisplayListPlayerThorVG() = default;
 
-Replay::FfiRasterPainter DisplayListPlayerThorVG::begin(Gfx::PaintingSurface& surface, DrawnFonts const& fonts, DrawnImageFrames const* images)
+Replay::FfiRasterPainter DisplayListPlayerThorVG::begin(Gfx::PaintingSurface& surface, DrawnFonts const& fonts, DrawnImageFrames const* images, CurrentVideoFrame current_video_frame)
 {
     m_impl->open(surface);
     m_impl->fonts = &fonts;
     m_impl->images = images;
+    m_impl->current_video_frame = move(current_video_frame);
     return m_impl->callbacks();
 }
 
 void DisplayListPlayerThorVG::end()
 {
     m_impl->finish();
+    m_impl->current_video_frame = nullptr;
     if (m_impl->glyphs_painted && !m_impl->reported_text) {
         dbgln("ThorVG painted {} positioned glyphs into the page bitmap", m_impl->glyphs_painted);
         m_impl->reported_text = true;

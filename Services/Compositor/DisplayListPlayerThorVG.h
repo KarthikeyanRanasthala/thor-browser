@@ -4,10 +4,13 @@
 
 #pragma once
 
+#include <AK/Function.h>
 #include <AK/NonnullOwnPtr.h>
 #include <Compositor/DrawnResources.h>
 #include <Compositor/Forward.h>
 #include <LibCompositing/RustFFI.h>
+#include <LibMedia/VideoSinkHandle.h>
+#include <LibMediaCodecs/VideoFrame.h>
 
 namespace Compositor {
 
@@ -18,7 +21,8 @@ public:
     ~DisplayListPlayerThorVG();
     static void set_enabled(bool);
     static bool enabled();
-    Compositing::RustFFI::FfiRasterPainter begin(Gfx::PaintingSurface&, DrawnFonts const&, DrawnImageFrames const*);
+    using CurrentVideoFrame = Function<RefPtr<Media::VideoFrame>(Media::VideoSinkHandle)>;
+    Compositing::RustFFI::FfiRasterPainter begin(Gfx::PaintingSurface&, DrawnFonts const&, DrawnImageFrames const*, CurrentVideoFrame = {});
     void end();
 
     static void clear(Gfx::PaintingSurface&, Gfx::Color);

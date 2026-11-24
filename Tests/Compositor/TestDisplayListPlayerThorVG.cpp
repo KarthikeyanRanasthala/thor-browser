@@ -5,9 +5,13 @@
 #include <Compositor/DisplayListPlayerThorVG.h>
 #include <Compositor/PaintingSurface.h>
 #include <LibCompositing/DisplayList/DisplayListCommand.h>
+#include <LibCore/File.h>
 #include <LibCore/MappedFile.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Font/Font.h>
+#include <LibMediaCodecs/VideoFramePool.h>
+#include <LibMediaCodecs/VideoSurface.h>
+#include <LibTest/TemporaryDirectory.h>
 #include <LibTest/TestCase.h>
 #include <core/SkCanvas.h>
 
@@ -87,4 +91,54 @@ TEST_CASE(thorvg_composites_a_cropped_tile_into_a_shared_page)
     EXPECT_EQ(page->get_pixel(12, 10), Gfx::Color(Gfx::Color::Red));
     EXPECT_EQ(page->get_pixel(10, 8), Gfx::Color(Gfx::Color::Transparent));
     EXPECT_EQ(page->get_pixel(9, 8), Gfx::Color(Gfx::Color::White));
+}
+
+TEST_CASE(thorvg_replays_successive_video_frames_from_the_same_sink)
+{
+    Media::VideoFrameMetadata metadata {
+        .timestamp = {},
+        .duration = AK::Duration::from_milliseconds(33),
+        .size = { 4, 4 },
+        .bit_depth = 8,
+        .subsampling = Media::Subsampling::yuv420(),
+        .color_metadata = {},
+    };
+    auto layout = MUST(Media::frame_plane_layout(metadata.size, metadata.bit_depth, metadata.subsampling));
+    Test::TemporaryDirectory directory { "ThorVGVideoFrame"sv };
+    auto file = MUST(Core::File::open(directory.path().append("planes"sv).string(), Core::File::OpenMode::ReadWrite));
+    MUST(file->truncate(layout.total_byte_count));
+    auto buffer = MUST(Core::AnonymousBuffer::create_from_anon_fd(file->leak_fd(), layout.total_byte_count));
+    memset(buffer.data<u8>(), 128, layout.total_byte_count);
+
+    auto page = MUST(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied, { 16, 16 }));
+    auto surface = Gfx::PaintingSurface::wrap_bitmap(*page);
+    Compositor::DrawnFonts fonts;
+    Compositor::DisplayListPlayerThorVG player;
+    Media::VideoSinkHandle sink { 7 };
+    Compositing::DrawVideoFrame command { { 3, 4, 8, 8 }, sink, Gfx::ScalingMode::NearestNeighbor };
+    RefPtr<Media::VideoFrame> current_frame;
+    auto paint = [&] {
+        Compositor::DisplayListPlayerThorVG::clear(*surface, Gfx::Color::Red);
+        auto painter = player.begin(*surface, fonts, nullptr, [&](Media::VideoSinkHandle handle) {
+            EXPECT_EQ(handle, sink);
+            return current_frame;
+        });
+        painter.play_command(painter.context, command.command_type, reinterpret_cast<u8 const*>(&command), nullptr, 0);
+        player.end();
+        EXPECT_EQ(page->get_pixel(2, 6), Gfx::Color(Gfx::Color::Red));
+        return page->get_pixel(6, 6);
+    };
+    auto present = [&](u8 luma) {
+        memset(buffer.data<u8>(), luma, layout.y_size);
+        current_frame = MUST(Media::create_received_video_frame(metadata, buffer, 1, [] { }));
+        return paint();
+    };
+    auto dark = present(16);
+    EXPECT(dark.red() < 32 && dark.green() < 32 && dark.blue() < 32);
+    EXPECT_EQ(paint(), dark);
+    current_frame = nullptr;
+    auto light = present(235);
+    EXPECT(light.red() > 220 && light.green() > 220 && light.blue() > 220);
+    current_frame = nullptr;
+    EXPECT_EQ(paint(), Gfx::Color(Gfx::Color::Red));
 }

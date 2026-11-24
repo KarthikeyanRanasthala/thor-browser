@@ -1075,8 +1075,10 @@ Compositing::RustFFI::FfiRasterPainter CompositorState::begin_painting(Web::Comp
     if (DisplayListPlayerThorVG::enabled()) {
         if (m_painting_depth == m_thorvg_players.size())
             m_thorvg_players.append(make<DisplayListPlayerThorVG>());
-        bool page = resources == RustFFI::PaintingResources::Page;
-        return m_thorvg_players[m_painting_depth++]->begin(surface, page ? raster_targets.fonts() : raster_targets.overlay_fonts(), page ? &raster_targets.image_frames() : nullptr);
+        auto& player = *m_thorvg_players[m_painting_depth++];
+        if (resources == RustFFI::PaintingResources::Page)
+            return player.begin(surface, raster_targets.fonts(), &raster_targets.image_frames(), [this, &client = context.web_content_client](Media::VideoSinkHandle handle) { return current_video_frame(client, handle); });
+        return player.begin(surface, raster_targets.overlay_fonts(), nullptr);
     }
 #endif
     if (m_painting_depth == m_display_list_players.size())
