@@ -1,0 +1,99 @@
+name: ThorVG macOS builds
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: thorvg-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: macOS arm64 / ${{ matrix.preset }}
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: ThorVG
+            engines: cpu
+            build_dir: Build/thorvg
+          - preset: ThorVGGL
+            engines: cpu,gl
+            build_dir: Build/thorvg-gl
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.4'
+      BUILD_DIR: ${{ matrix.build_dir }}
+      PRESET: ${{ matrix.preset }}
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+        with:
+          os: macOS
+          arch: arm64
+          toolchain: Clang
+          build_preset: ${{ matrix.preset }}
+          xcode_version: '26'
+
+      - name: Check out ThorVG
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: thorvg/thorvg
+          ref: a20bfdf6ad804ada6ed5ac4a4237d2b431757952
+          path: Build/thorvg-src
+          persist-credentials: false
+
+      - name: Build ThorVG
+        env:
+          ENGINES: ${{ matrix.engines }}
+        run: |
+          brew install meson
+          prefix="$RUNNER_TEMP/thorvg"
+          meson setup "$RUNNER_TEMP/thorvg-build" Build/thorvg-src --prefix="$prefix" --libdir=lib \
+            --buildtype=release --default-library=static -Dengines="$ENGINES" -Dloaders= -Dextra=
+          meson install -C "$RUNNER_TEMP/thorvg-build"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Cache vcpkg binaries
+        uses: actions/cache@v6
+        with:
+          path: Build/caches/vcpkg-binary-cache
+          key: thorvg-vcpkg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('vcpkg*.json', 'Meta/CMake/vcpkg/**') }}
+
+      - name: Build browser and renderer tests
+        run: |
+          jobs=$(sysctl -n hw.ncpu)
+          python3 Meta/ladybird.py build --preset "$PRESET" -j "$jobs" Ladybird
+          targets=(WebDriver TestThorVGPainter)
+          if [[ "$PRESET" == ThorVGGL ]]; then targets+=(TestThorVGGL); fi
+          cmake --build "$BUILD_DIR" --parallel "$jobs" --target "${targets[@]}"
+
+      - name: Run renderer tests
+        run: |
+          ctest --test-dir "$BUILD_DIR" --output-on-failure --no-tests=error -R '^TestThorVGPainter$'
+          if [[ "$PRESET" == ThorVGGL ]]; then
+            ctest --test-dir "$BUILD_DIR" --output-on-failure --no-tests=error -R '^TestThorVGGL$'
+          fi
+
+      - name: Package the browser
+        run: |
+          cmake --install "$BUILD_DIR" --strip --component ladybird_Runtime --prefix "$RUNNER_TEMP/install"
+          python3 Meta/package-macos-test-bundle.py --build-dir "$BUILD_DIR" \
+            --install-dir "$RUNNER_TEMP/install" --output "Ladybird-$PRESET.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Ladybird-macOS-arm64-${{ matrix.preset }}
+          path: Ladybird-${{ matrix.preset }}.tar.gz
+          compression-level: 0
+          if-no-files-found: error

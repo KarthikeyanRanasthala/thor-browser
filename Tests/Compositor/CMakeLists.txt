@@ -32,7 +32,10 @@ if (ENABLE_THORVG_RASTERIZER)
 endif()
 if (ENABLE_THORVG_GL)
     ladybird_test(TestThorVGGL.cpp "Compositor" LIBS compositorservice LibCompositing LibGfx)
-    set_tests_properties(TestThorVGGL PROPERTIES LABELS "gpu")
+    # Hosted macOS runners can lack an accelerated pixel format. Once one is available,
+    # context creation, drawing and framebuffer assertions must all succeed.
+    set_tests_properties(TestThorVGGL PROPERTIES LABELS "gpu"
+        SKIP_REGULAR_EXPRESSION "ThorVG GL could not find an accelerated OpenGL pixel format")
 endif()
 target_sources(TestCompositor PRIVATE ${TEST_SOURCES})
 target_link_libraries(TestCompositor PRIVATE compositorservice LibCompositing LibGfx)

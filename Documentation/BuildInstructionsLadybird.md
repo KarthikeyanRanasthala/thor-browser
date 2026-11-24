@@ -341,6 +341,8 @@ open -n Build/thorvg-gl/bin/Ladybird.app --args --temporary-profile --renderer=t
 
 The compositor creates an accelerated OpenGL 4.1 context and paints into BGRA IOSurfaces. The Rust tile compositor can clear these buffers and copy tiles between framebuffers on the GPU. Each GPU operation completes synchronously before Ladybird reuses or presents the shared pixels. Ordinary bitmap snapshots use the software painter. Video conversion and some intermediate image copies still run on the CPU. With `--stats-log-dir`, the compositor reports completed GL painting passes as `gpu.thorvg_painted_passes`. The GPU test needs access to the macOS graphics device. To select software page painting in this build, use `--renderer=thorvg`.
 
+The [ThorVG macOS builds workflow](../.github/workflows/thorvg.yml) builds both presets on pushes to `master`, on pull requests, and from **Actions → ThorVG macOS builds → Run workflow**. Each successful job uploads a compressed `Ladybird.app` for Apple Silicon. Both jobs run the software painter tests. The OpenGL job also runs the framebuffer test, which CTest marks as skipped when macOS exposes no accelerated pixel format.
+
 ### Building with limited system memory
 
 The default build mode will run as many build steps in parallel as possible, which includes link steps;
