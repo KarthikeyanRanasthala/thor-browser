@@ -17,6 +17,9 @@
 #include <Compositor/CompositorCore.h>
 #include <Compositor/ContextRasterTargets.h>
 #include <Compositor/DisplayListPlayerSkia.h>
+#ifdef ENABLE_THORVG_RASTERIZER
+#    include <Compositor/DisplayListPlayerThorVG.h>
+#endif
 #include <Compositor/RemoteLayer.h>
 #include <Compositor/SkiaBackendContext.h>
 #include <Compositor/VSyncScheduler.h>
@@ -276,6 +279,9 @@ private:
         RefPtr<Gfx::PaintingSurface> target_surface;
         // Rasters on the CPU, so the pixels match a raster of the same list in any other process.
         OwnPtr<DisplayListPlayerSkia> player;
+#ifdef ENABLE_THORVG_RASTERIZER
+        OwnPtr<DisplayListPlayerThorVG> thorvg_player;
+#endif
     };
     HashMap<WebContentClientId, HashMap<u64, NonnullOwnPtr<StagedRasterization>>> m_staged_rasterizations;
 
@@ -299,6 +305,9 @@ private:
     CanvasHost* m_canvas_host_painting_2d_context { nullptr };
     // A context nested in another is painted while the frame of the other is, by a player of its own.
     Vector<NonnullOwnPtr<DisplayListPlayerSkia>> m_display_list_players;
+#ifdef ENABLE_THORVG_RASTERIZER
+    Vector<NonnullOwnPtr<DisplayListPlayerThorVG>> m_thorvg_players;
+#endif
     size_t m_painting_depth { 0 };
     HashMap<Optional<u64>, OwnPtr<VSyncScheduler>> m_vsync_schedulers_by_display;
     double m_maximum_display_refresh_rate { 60.0 };

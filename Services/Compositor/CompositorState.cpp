@@ -1071,6 +1071,14 @@ Compositing::RustFFI::FfiRasterPainter CompositorState::begin_painting(Web::Comp
 {
     auto& context = presented_context(context_id);
     auto& raster_targets = context.raster_targets;
+#ifdef ENABLE_THORVG_RASTERIZER
+    if (DisplayListPlayerThorVG::enabled()) {
+        if (m_painting_depth == m_thorvg_players.size())
+            m_thorvg_players.append(make<DisplayListPlayerThorVG>());
+        bool page = resources == RustFFI::PaintingResources::Page;
+        return m_thorvg_players[m_painting_depth++]->begin(surface, page ? raster_targets.fonts() : raster_targets.overlay_fonts(), page ? &raster_targets.image_frames() : nullptr);
+    }
+#endif
     if (m_painting_depth == m_display_list_players.size())
         m_display_list_players.append(make<DisplayListPlayerSkia>(m_skia_backend_context));
     auto& player = *m_display_list_players[m_painting_depth++];
@@ -1086,6 +1094,12 @@ Compositing::RustFFI::FfiRasterPainter CompositorState::begin_painting(Web::Comp
 void CompositorState::end_painting()
 {
     VERIFY(m_painting_depth > 0);
+#ifdef ENABLE_THORVG_RASTERIZER
+    if (DisplayListPlayerThorVG::enabled()) {
+        m_thorvg_players[--m_painting_depth]->end();
+        return;
+    }
+#endif
     m_display_list_players[--m_painting_depth]->end_painting();
 }
 
@@ -1282,6 +1296,13 @@ bool CompositorState::begin_staged_rasterization(WebContentClientId client, u64 
     }
     __builtin_memset(target.scanline_u8(0), 0, target.size_in_bytes());
     rasterization->target_surface = Gfx::PaintingSurface::wrap_bitmap(target);
+#ifdef ENABLE_THORVG_RASTERIZER
+    if (DisplayListPlayerThorVG::enabled()) {
+        rasterization->thorvg_player = make<DisplayListPlayerThorVG>();
+        painter = rasterization->thorvg_player->begin(*rasterization->target_surface, rasterization->fonts, &rasterization->image_frames);
+        return true;
+    }
+#endif
     rasterization->player = make<DisplayListPlayerSkia>(RefPtr<Gfx::SkiaBackendContext> {});
     painter = rasterization->player->begin_painting(*rasterization->target_surface, rasterization->fonts, &rasterization->image_frames, rasterization->raster_cache, nullptr, nullptr);
     return true;
@@ -1295,6 +1316,10 @@ void CompositorState::finish_staged_rasterization(WebContentClientId client, u64
     auto rasterization = staged->value.take(token);
     if (!rasterization.has_value())
         return;
+#ifdef ENABLE_THORVG_RASTERIZER
+    if ((*rasterization)->thorvg_player)
+        (*rasterization)->thorvg_player->end();
+#endif
     if (auto& player = (*rasterization)->player) {
         player->end_painting();
         DisplayListPlayerSkia::flush(*(*rasterization)->target_surface);
@@ -1700,8 +1725,17 @@ RustFFI::FfiRasterHost CompositorState::raster_host(CompositorState& state)
         .surface_translate = [](Gfx::PaintingSurface const* surface, float x, float y) { canvas_of(surface).translate(x, y); },
         .surface_scale = [](Gfx::PaintingSurface const* surface, float x, float y) { canvas_of(surface).scale(x, y); },
         .surface_clip_rect = [](Gfx::PaintingSurface const* surface, Gfx::IntRect rect) { canvas_of(surface).clipIRect(SkIRect::MakeXYWH(rect.x(), rect.y(), rect.width(), rect.height())); },
-        .surface_clear = [](Gfx::PaintingSurface const* surface, Gfx::Color color) { canvas_of(surface).clear(Gfx::to_skia_color(color)); },
+        .surface_clear = [](Gfx::PaintingSurface const* surface, Gfx::Color color) {
+#ifdef ENABLE_THORVG_RASTERIZER
+            if (DisplayListPlayerThorVG::enabled())
+                return DisplayListPlayerThorVG::clear(mutable_surface(surface), color);
+#endif
+            canvas_of(surface).clear(Gfx::to_skia_color(color)); },
         .surface_draw_surface = [](Gfx::PaintingSurface const* target, Gfx::PaintingSurface const* source, Gfx::IntRect source_rect, Gfx::IntRect target_rect, RustFFI::SurfaceBlend blend) {
+#ifdef ENABLE_THORVG_RASTERIZER
+            if (DisplayListPlayerThorVG::enabled())
+                return DisplayListPlayerThorVG::blit(mutable_surface(target), *source, source_rect, target_rect, blend == RustFFI::SurfaceBlend::Source);
+#endif
             auto image = source->sk_image_snapshot<sk_sp<SkImage>>();
             SkPaint paint;
             paint.setBlendMode(blend == RustFFI::SurfaceBlend::Source ? SkBlendMode::kSrc : SkBlendMode::kSrcOver);

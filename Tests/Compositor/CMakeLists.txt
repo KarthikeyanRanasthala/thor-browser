@@ -15,6 +15,10 @@ list(APPEND TEST_SOURCES
     TestYUVData.cpp
 )
 
+if (ENABLE_THORVG_RASTERIZER)
+    list(APPEND TEST_SOURCES TestDisplayListPlayerThorVG.cpp)
+endif()
+
 if (APPLE)
     list(APPEND TEST_SOURCES TestVideoSurfaceImage.mm)
     target_link_libraries(TestCompositor PRIVATE "-framework CoreVideo")

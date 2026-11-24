@@ -91,6 +91,7 @@ public:
 
     void notify_content_will_change();
 
+    Bitmap* backing_bitmap() const;
     IntSize size() const;
     IntRect rect() const;
 

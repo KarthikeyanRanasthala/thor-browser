@@ -40,6 +40,9 @@ struct PathData {
     WindingRule winding_rule { WindingRule::Nonzero };
 };
 
+// Visits each glyph in order with its outline in CSS pixels relative to its baseline.
+void with_glyph_outlines(Font const&, ReadonlySpan<u32> glyph_ids, Function<void(size_t, PathData const&)> const&);
+
 // The contours are valid only during the call. Bytes that describe no path give no contours.
 void with_contours_of_serialized_path(ReadonlyBytes serialized_path, Function<void(PathData const&)> const& callback);
 

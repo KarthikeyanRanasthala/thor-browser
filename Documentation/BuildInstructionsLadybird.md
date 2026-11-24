@@ -306,6 +306,22 @@ cmake --build --preset Release MyBuildDir
 ninja -C MyBuildDir run-ladybird
 ```
 
+### Experimental ThorVG page painting
+
+With `ENABLE_THORVG_RASTERIZER=ON`, Ladybird defaults to a CPU compositor that replays the page display list into the destination bitmap using ThorVG 1.2. Ladybird supplies the font, shaped glyph IDs and positions. Its HarfBuzz and CoreText outline code supplies the contours that ThorVG fills or strokes. Text available only as a color bitmap is skipped.
+
+The painter supports solid shapes and strokes, intersecting clips, affine transforms, opacity and common blend modes, decoded images, inline vector images, and linear and radial CSS gradients. Gradients use ThorVG's color interpolation. Filters are omitted, masked content and unsupported paint commands are skipped, and unsupported layer blends use source-over. Canvas and video display-list commands and repeated pattern tiles are currently skipped. Skia is still linked for other Ladybird components and for geometry and surface management. Use `--renderer=skia` to select Ladybird's regular page painter.
+
+With the sibling ThorVG checkout installed under `build-cpu/install`, run the following from the Ladybird checkout.
+
+```sh
+export PKG_CONFIG_PATH="$PWD/../thorvg/build-cpu/install/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+cmake --preset Release -DENABLE_THORVG_RASTERIZER=ON
+cmake --build Build/release --target Ladybird TestCompositor
+ctest --test-dir Build/release -R '^TestCompositor$' --output-on-failure
+open -n Build/release/bin/Ladybird.app --args --temporary-profile --renderer=thorvg https://www.google.com/
+```
+
 ### Building with limited system memory
 
 The default build mode will run as many build steps in parallel as possible, which includes link steps;

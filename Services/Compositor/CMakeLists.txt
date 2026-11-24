@@ -45,6 +45,14 @@ test_rust_crate(MANIFEST_PATH Rust/Cargo.toml CRATE_NAME compositor_core)
 add_library(compositorservice STATIC ${SOURCES} ${GENERATED_SOURCES})
 ladybird_generated_sources(compositorservice)
 
+if (ENABLE_THORVG_RASTERIZER)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(ThorVG REQUIRED IMPORTED_TARGET thorvg-1>=1.2)
+    target_sources(compositorservice PRIVATE DisplayListPlayerThorVG.cpp ThorVGPath.cpp)
+    target_link_libraries(compositorservice PRIVATE PkgConfig::ThorVG)
+    target_compile_definitions(compositorservice PUBLIC ENABLE_THORVG_RASTERIZER=1)
+endif()
+
 add_executable(Compositor main.cpp)
 
 if (LINUX)

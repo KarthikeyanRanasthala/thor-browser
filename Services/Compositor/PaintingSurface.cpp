@@ -47,6 +47,11 @@ struct PaintingSurface::Impl {
     Function<void(PaintingSurface&)> on_flush {};
 };
 
+Bitmap* PaintingSurface::backing_bitmap() const
+{
+    return impl().bitmap.ptr();
+}
+
 void PaintingSurface::destroy_impl(void* impl)
 {
     auto* surface_impl = static_cast<PaintingSurface::Impl*>(impl);

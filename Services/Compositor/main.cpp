@@ -5,6 +5,9 @@
  */
 
 #include <Compositor/BackingStoreFactory.h>
+#ifdef ENABLE_THORVG_RASTERIZER
+#    include <Compositor/DisplayListPlayerThorVG.h>
+#endif
 #include <Compositor/ConnectionFromClient.h>
 #include <Compositor/FontSkia.h>
 #include <Compositor/MainDispatchQueue.h>
@@ -54,7 +57,14 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     args_parser.add_option(gpu_device, "The GPU to paint on, as the presentation identifies it", "gpu-device", 0, "identity");
     StringView drm_format_modifiers;
     args_parser.add_option(drm_format_modifiers, "The DRM format modifiers the presentation can import from that GPU", "drm-format-modifiers", 0, "hex,...");
+#ifdef ENABLE_THORVG_RASTERIZER
+    bool use_thorvg = false;
+    args_parser.add_option(use_thorvg, "Use ThorVG for page rendering", "thorvg");
+#endif
     args_parser.parse(arguments);
+#ifdef ENABLE_THORVG_RASTERIZER
+    Compositor::DisplayListPlayerThorVG::set_enabled(use_thorvg);
+#endif
 
     auto stats_log = TRY(Core::StatsLog::create(stats_log_directory, "Compositor"sv));
 

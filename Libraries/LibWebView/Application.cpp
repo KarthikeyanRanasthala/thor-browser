@@ -366,6 +366,11 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     bool expose_experimental_interfaces = false;
     bool expose_internals_object = false;
     bool force_cpu_painting = false;
+#ifdef ENABLE_THORVG_RASTERIZER
+    StringView renderer = "thorvg"sv;
+#else
+    StringView renderer = "skia"sv;
+#endif
     HashTable<PlatformFeatures::Feature> disabled_features;
     HashTable<PlatformFeatures::Feature> force_enabled_features;
     auto parse_feature_list = [](StringView list, HashTable<PlatformFeatures::Feature>& features) {
@@ -493,6 +498,9 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     args_parser.add_option(enable_autoplay, "Enable multimedia autoplay", "enable-autoplay");
     args_parser.add_option(expose_experimental_interfaces, "Expose experimental IDL interfaces", "expose-experimental-interfaces");
     args_parser.add_option(expose_internals_object, "Expose internals object", "expose-internals-object");
+#ifdef ENABLE_THORVG_RASTERIZER
+    args_parser.add_option(renderer, "Page rasterizer (skia or thorvg)", "renderer", 0, "name");
+#endif
     args_parser.add_option(force_cpu_painting, "Force CPU painting, the same as --disable-features=gpu_painting", "force-cpu-painting");
     args_parser.add_option(Core::ArgsParser::Option {
         .argument_mode = Core::ArgsParser::OptionArgumentMode::Required,
@@ -549,6 +557,12 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
 
     create_platform_arguments(args_parser);
     args_parser.parse(m_arguments);
+    if (renderer != "skia"sv && renderer != "thorvg"sv)
+        return Error::from_string_literal("--renderer must be skia or thorvg");
+    if (renderer == "thorvg"sv) {
+        force_cpu_painting = true;
+        force_enabled_features.remove(PlatformFeatures::Feature::GpuPainting);
+    }
 
     m_stats_log = TRY(Core::StatsLog::create(stats_log_directory, "Ladybird"sv));
 
@@ -581,6 +595,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
     m_explicit_content_blocker_list_paths = move(content_blocker_list_paths);
 
     m_browser_options = {
+        .use_thorvg = renderer == "thorvg"sv,
         .urls = {},
         .raw_urls = move(raw_urls),
         .headless_mode = headless_mode,

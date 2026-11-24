@@ -32,6 +32,7 @@ else()
     set(freedesktop_files_default OFF)
 endif()
 
+option(ENABLE_THORVG_RASTERIZER "Build and default to the experimental ThorVG CPU page painter" OFF)
 option(ENABLE_GUI_TARGETS "Enable building GUI targets" ON)
 option(LADYBIRD_BUILD_QT "Build and bundle Qt with vcpkg on Linux" OFF)
 option(ENABLE_INSTALL_HEADERS "Enable installing headers" ON)

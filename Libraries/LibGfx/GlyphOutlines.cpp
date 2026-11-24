@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Function.h>
 #include <AK/ScopeGuard.h>
 #include <AK/TypeCasts.h>
 #include <LibGfx/Font/Font.h>
+#include <LibGfx/PathData.h>
 #include <LibGfx/RustFFI.h>
 
 #include <harfbuzz/hb.h>
@@ -195,6 +197,27 @@ public:
 #endif
 };
 
+template<typename IdAt, typename Visit>
+void visit_outlines(Font const& font, size_t glyph_count, IdAt glyph_id, Visit visit)
+{
+    GlyphOutliner outliner { font };
+    auto* outline = Gfx::FFI::path_geometry_create();
+    ScopeGuard destroy_outline = [&] { Gfx::FFI::path_geometry_destroy(outline); };
+    for (size_t index = 0; index < glyph_count; ++index) {
+        Gfx::FFI::path_geometry_clear(outline);
+        outliner.draw_outline(glyph_id(index), outline);
+        Gfx::FFI::PathGeometryData data;
+        Gfx::FFI::path_geometry_data(outline, &data);
+        visit(index, data);
+    }
+}
+
+}
+
+void with_glyph_outlines(Font const& font, ReadonlySpan<u32> glyph_ids, Function<void(size_t, PathData const&)> const& visit)
+{
+    visit_outlines(font, glyph_ids.size(), [&](size_t i) { return glyph_ids[i]; },
+        [&](size_t i, FFI::PathGeometryData const& data) { visit(i, PathData::from_ffi(data)); });
 }
 
 }
@@ -208,14 +231,7 @@ void ladybird_gfx_font_glyph_outlines(void const* font, Gfx::FFI::DrawGlyph cons
 // Calls the callback with the outline of each glyph, in pixels with its origin on the baseline.
 extern "C" void ladybird_gfx_font_glyph_outlines(void const* font, Gfx::FFI::DrawGlyph const* glyphs, size_t glyph_count, void (*visit)(void*, size_t, Gfx::FFI::PathGeometryData const*), void* context)
 {
-    Gfx::GlyphOutliner outliner { *static_cast<Gfx::Font const*>(font) };
-    auto* outline = Gfx::FFI::path_geometry_create();
-    ScopeGuard destroy_outline = [&] { Gfx::FFI::path_geometry_destroy(outline); };
-    for (size_t index = 0; index < glyph_count; ++index) {
-        Gfx::FFI::path_geometry_clear(outline);
-        outliner.draw_outline(glyphs[index].glyph_id, outline);
-        Gfx::FFI::PathGeometryData data;
-        Gfx::FFI::path_geometry_data(outline, &data);
-        visit(context, index, &data);
-    }
+    Gfx::visit_outlines(*static_cast<Gfx::Font const*>(font), glyph_count,
+        [&](size_t i) { return glyphs[i].glyph_id; },
+        [&](size_t i, Gfx::FFI::PathGeometryData const& data) { visit(context, i, &data); });
 }
