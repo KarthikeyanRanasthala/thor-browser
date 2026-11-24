@@ -1,4 +1,4 @@
-name: ThorVG macOS builds
+name: Thor Browser macOS builds
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     if: github.event_name != 'push' || !github.event.deleted
-    name: macOS arm64 / ${{ matrix.preset }}
+    name: Thor Browser macOS arm64 / ${{ matrix.preset }}
     runs-on: macos-26
     outputs:
       commit: ${{ steps.checkout.outputs.commit }}
@@ -93,20 +93,22 @@ jobs:
 
       - name: Package the browser
         run: |
+          cmp Build/thorvg-src/LICENSE Meta/Licenses/ThorVG.txt
+          VCPKG_ROOT="$PWD/Build/vcpkg-release" cmake --build "$BUILD_DIR" --target third_party_sources
           cmake --install "$BUILD_DIR" --strip --component ladybird_Runtime --prefix "$RUNNER_TEMP/install"
           python3 Meta/package-macos-test-bundle.py --build-dir "$BUILD_DIR" \
             --extra-dylib "$RUNNER_TEMP/thorvg/lib/libthorvg-1.dylib" \
-            --install-dir "$RUNNER_TEMP/install" --output "Ladybird-macOS-arm64-$PRESET.dmg"
+            --install-dir "$RUNNER_TEMP/install" --output "Thor-Browser-macOS-arm64-$PRESET.dmg"
 
       - uses: actions/upload-artifact@v7
         with:
-          path: Ladybird-macOS-arm64-${{ matrix.preset }}.dmg
+          path: Thor-Browser-macOS-arm64-${{ matrix.preset }}.dmg
           archive: false
           overwrite: true
           if-no-files-found: error
 
   test-release-images:
-    name: Open release images on macOS 15
+    name: Test Thor Browser disk images on macOS 15
     needs: build
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/thorvg-v') && !github.event.deleted
     runs-on: macos-15
@@ -114,7 +116,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: Ladybird-macOS-arm64-*.dmg
+          pattern: Thor-Browser-macOS-arm64-*.dmg
           path: images
           merge-multiple: true
           skip-decompress: true
@@ -124,9 +126,20 @@ jobs:
           mount="$RUNNER_TEMP/mounted"
           mkdir "$mount"
           for preset in ThorVG ThorVGGL; do
-            hdiutil attach -readonly -nobrowse -mountpoint "$mount" "images/Ladybird-macOS-arm64-$preset.dmg"
-            app="Ladybird ThorVG"
-            if [[ "$preset" == ThorVGGL ]]; then app="Ladybird ThorVG GL"; fi
+            hdiutil attach -readonly -nobrowse -mountpoint "$mount" "images/Thor-Browser-macOS-arm64-$preset.dmg"
+            app="Thor Browser"
+            bundle_id="sh.karthikeyan.thor-browser"
+            if [[ "$preset" == ThorVGGL ]]; then
+              app="Thor Browser GL"
+              bundle_id="$bundle_id.gl"
+            fi
+            tar -tf "$mount/Sources/third-party-sources.tar" > "$RUNNER_TEMP/lgpl-ports.txt"
+            grep -q '^qtbase-' "$RUNNER_TEMP/lgpl-ports.txt"
+            grep -q '^ffmpeg-' "$RUNNER_TEMP/lgpl-ports.txt"
+            test -s "$mount/Sources/README.txt"
+            contents="$mount/$app.app/Contents"
+            test "$(plutil -extract CFBundleIdentifier raw "$contents/Info.plist")" = "$bundle_id"
+            test "$(plutil -extract CFBundleDisplayName raw "$contents/Info.plist")" = "$app"
             test "$(readlink "$mount/Applications")" = /Applications
             codesign --verify --deep --strict "$mount/$app.app"
             "$mount/$app.app/Contents/MacOS/Ladybird" --headless=text --temporary-profile --renderer=thorvg \
@@ -137,7 +150,7 @@ jobs:
           done
 
   release:
-    name: Publish ThorVG release
+    name: Publish Thor Browser release
     needs: [build, test-release-images]
     runs-on: ubuntu-latest
     permissions:
@@ -145,7 +158,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: Ladybird-macOS-arm64-*.dmg
+          pattern: Thor-Browser-macOS-arm64-*.dmg
           path: images
           merge-multiple: true
           skip-decompress: true
@@ -157,7 +170,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           BUILT_COMMIT: ${{ needs.build.outputs.commit }}
         run: |
-          images=(Ladybird-macOS-arm64-ThorVG.dmg Ladybird-macOS-arm64-ThorVGGL.dmg)
+          images=(Thor-Browser-macOS-arm64-ThorVG.dmg Thor-Browser-macOS-arm64-ThorVGGL.dmg)
           for image in "${images[@]}"; do test -s "$image"; done
           sha256sum "${images[@]}" > SHA256SUMS
 
@@ -173,7 +186,7 @@ jobs:
               exit 0
             fi
           else
-            gh release create "$tag" --draft --verify-tag --title "Ladybird ThorVG ${tag#thorvg-v}" --generate-notes
+            gh release create "$tag" --draft --verify-tag --title "Thor Browser ${tag#thorvg-v}" --generate-notes --notes "Published by KarthikeyanRanasthala independently of the Ladybird Browser Initiative. Each disk image includes the matching LGPL sources in Sources/."
           fi
           gh release upload "$tag" "${images[@]}" SHA256SUMS --clobber
           gh release edit "$tag" --draft=false --verify-tag

@@ -27,6 +27,7 @@ header {
 }
 
 .logomark {
+    object-fit: contain;
     width: 56px;
     height: 46.8px;
     color: var(--brand);

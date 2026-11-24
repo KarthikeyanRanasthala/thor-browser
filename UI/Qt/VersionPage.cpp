@@ -9,7 +9,6 @@
 #include <AK/String.h>
 #include <LibCore/BrowserVersion.h>
 #include <LibCore/System.h>
-#include <LibWebCommon/Loader/UserAgent.h>
 #include <LibWebView/BuildInformation.h>
 #include <UI/Qt/Application.h>
 #include <UI/Qt/VersionPage.h>
@@ -24,7 +23,7 @@ void VersionPage::received_message(String const& name, JsonValue const&)
 
 void VersionPage::load_version_info()
 {
-    static NeverDestroyed<String> browser_name = String::from_utf8_without_validation({ BROWSER_NAME, __builtin_strlen(BROWSER_NAME) });
+    static NeverDestroyed<String> browser_name = String::from_utf8_without_validation({ BROWSER_APP_NAME, __builtin_strlen(BROWSER_APP_NAME) });
     static NeverDestroyed<String> browser_version = String::from_utf8_without_validation({ BROWSER_VERSION, __builtin_strlen(BROWSER_VERSION) });
     static NeverDestroyed<String> release_stage = String::from_utf8_without_validation({ BROWSER_RELEASE_STAGE, __builtin_strlen(BROWSER_RELEASE_STAGE) });
     static NeverDestroyed<String> product_name = String::from_utf8_without_validation({ BROWSER_PRODUCT_NAME, __builtin_strlen(BROWSER_PRODUCT_NAME) });
@@ -35,6 +34,7 @@ void VersionPage::load_version_info()
     static NeverDestroyed<String> executable_path = MUST(String::from_byte_string(MUST(Core::System::current_executable_path())));
 
     JsonObject version_info;
+    version_info.set("thorBrowser"_string, static_cast<bool>(THOR_BROWSER));
     version_info.set("browserName"_string, *browser_name);
     version_info.set("browserVersion"_string, *browser_version);
     version_info.set("releaseStage"_string, *release_stage);

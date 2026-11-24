@@ -231,6 +231,8 @@ void SettingsUI::load_features()
     auto& application = Application::the();
 
     JsonObject features;
+    features.set("appName"_string, BROWSER_APP_NAME ""_string);
+    features.set("thorBrowser"_string, static_cast<bool>(THOR_BROWSER));
     features.set("menuBar"_string, application.supports_system_menu_bar());
     features.set("primaryPaste"_string, application.supports_clipboard_type(Application::ClipboardType::Selection));
     features.set("verticalTabs"_string, application.supports_vertical_tabs());

@@ -5,6 +5,7 @@
  */
 
 #include <AK/GenericShorthands.h>
+#include <LibCore/BrowserVersion.h>
 #include <LibWebView/Application.h>
 #include <UI/Qt/ChromeLayout.h>
 #include <UI/Qt/ChromeStyle.h>
@@ -107,8 +108,8 @@ LadybirdButton::LadybirdButton(WebView::IsPrivate is_private, QWidget* parent)
     , m_is_private(is_private)
 {
     setObjectName("LadybirdButton");
-    setAccessibleName(is_private == WebView::IsPrivate::Yes ? "Ladybird menu, private window" : "Ladybird menu");
-    setToolTip(is_private == WebView::IsPrivate::Yes ? "Ladybird menu, private window" : "Ladybird menu");
+    setAccessibleName(is_private == WebView::IsPrivate::Yes ? BROWSER_APP_NAME " menu, private window" : BROWSER_APP_NAME " menu");
+    setToolTip(is_private == WebView::IsPrivate::Yes ? BROWSER_APP_NAME " menu, private window" : BROWSER_APP_NAME " menu");
     setFocusPolicy(Qt::TabFocus);
     setPopupMode(QToolButton::InstantPopup);
     setFixedSize(sizeHint());
@@ -188,7 +189,12 @@ void LadybirdButton::paintEvent(QPaintEvent*)
     } else {
         QRectF logomark_rect { QPointF(), LOGOMARK_SIZE };
         logomark_rect.moveCenter(mark_center);
-        paint_logomark(painter, logomark_rect, mark_color, LOGOMARK_STROKE_WIDTH);
+        if constexpr (THOR_BROWSER) {
+            static QIcon const icon(":/thor-browser/app-browser.png");
+            icon.paint(&painter, logomark_rect.toRect());
+        } else {
+            paint_logomark(painter, logomark_rect, mark_color, LOGOMARK_STROKE_WIDTH);
+        }
     }
     auto chevron_center = QPointF(tile_rect.right() - TILE_TRAILING_PADDING - (CHEVRON_SIZE / 2), tile_rect.center().y());
     paint_chevron(painter, chevron_center, mark_color);

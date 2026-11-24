@@ -809,9 +809,9 @@ Hub::UIInfo Application::current_ui_info() const
 {
     QMessageBox dialog;
     dialog.setIcon(QMessageBox::Warning);
-    dialog.setText(QObject::tr("Ladybird is already running, but it is not responding."));
-    dialog.setInformativeText(QObject::tr("To open Ladybird with this profile, the Ladybird that is running must be closed first. What its pages have not saved will be lost."));
-    auto* close_button = dialog.addButton(QObject::tr("Close Ladybird"), QMessageBox::DestructiveRole);
+    dialog.setText(QObject::tr("%1 is already running, but it is not responding.").arg(BROWSER_APP_NAME));
+    dialog.setInformativeText(QObject::tr("To open %1 with this profile, close the running browser first. What its pages have not saved will be lost.").arg(BROWSER_APP_NAME));
+    auto* close_button = dialog.addButton(QObject::tr("Close %1").arg(BROWSER_APP_NAME), QMessageBox::DestructiveRole);
     dialog.setDefaultButton(dialog.addButton(QMessageBox::Cancel));
     // NB: Nothing else of this launch is on the screen yet, so the question has to be where the user sees it.
     dialog.setWindowFlag(Qt::WindowStaysOnTopHint);
@@ -2170,7 +2170,7 @@ bool Application::confirm_stop_active_downloads(QWidget* parent)
 
     if (downloader.has_unresumable_downloads()) {
         QMessageBox dialog(parent ? parent : active_window_if_any());
-        dialog.setWindowTitle("Ladybird");
+        dialog.setWindowTitle(BROWSER_APP_NAME);
         dialog.setIcon(QMessageBox::Warning);
         dialog.setText("Downloads are still in progress.");
         dialog.setInformativeText("Quitting will cancel downloads that cannot be resumed.");
@@ -2499,7 +2499,7 @@ static QMessageBox* create_message_box(QMessageBox::Icon icon, StringView text, 
 {
     auto* dialog = new QMessageBox(parent);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setWindowTitle("Ladybird");
+    dialog->setWindowTitle(BROWSER_APP_NAME);
     dialog->setIcon(icon);
     dialog->setTextFormat(Qt::PlainText);
     dialog->setText(qstring_from_ak_string(text));

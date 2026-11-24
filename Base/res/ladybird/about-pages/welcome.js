@@ -112,7 +112,7 @@ function updateDefaultBrowser() {
     defaultBrowser.classList.toggle("hidden", !isDefault && !canMakeDefault);
     defaultBrowserDescription.textContent =
         defaultBrowserFailure ??
-        (isDefault ? "Links from other apps open in Ladybird." : "Open links from other apps in Ladybird.");
+        (isDefault ? "Links from other apps open in this browser." : "Open links from other apps in this browser.");
     makeDefaultBrowser.classList.toggle("hidden", !canMakeDefault);
 
     // A control row is filled under the pointer, and a click anywhere on it reaches the control its label names. This
@@ -245,6 +245,14 @@ document.addEventListener("WebUIMessage", event => {
         engines = data;
     } else if (name === "loadFeatures") {
         features = data;
+        document.querySelector("header h1").textContent = `Welcome to ${data.appName}`;
+        if (data.thorBrowser) {
+            const icon = document.createElement("img");
+            icon.className = "logomark";
+            icon.src = "resource://ladybird/icon_256x256.png";
+            icon.alt = "";
+            document.querySelector("header .logomark").replaceWith(icon);
+        }
     } else if (name === "defaultBrowserResult") {
         makeDefaultBrowser.disabled = false;
         defaultBrowserFailure = data;

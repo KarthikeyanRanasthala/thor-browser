@@ -315,7 +315,7 @@ def verify(app: Path) -> None:
                 sys.exit(f"error: {binary.relative_to(app)} still links {name}, which isn't in the bundle")
 
 
-def write_disk_image(app: Path, output: Path) -> None:
+def write_disk_image(app: Path, output: Path, build_directory: Path) -> None:
     def version_components(version: str) -> tuple[int, ...]:
         return tuple(map(int, (version.split(".") + ["0", "0"])[:3]))
 
@@ -335,6 +335,31 @@ def write_disk_image(app: Path, output: Path) -> None:
         contents.mkdir()
         subprocess.run(["ditto", app, contents / f"{name}.app"], check=True)
         (contents / "Applications").symlink_to("/Applications")
+        if info["CFBundleIdentifier"] in {"sh.karthikeyan.thor-browser", "sh.karthikeyan.thor-browser.gl"}:
+            sources = contents / "Sources"
+            sources.mkdir()
+            archive = build_directory / "third-party-sources.tar"
+            if not archive.is_file():
+                sys.exit(f"Build the third_party_sources target in {build_directory} before packaging Thor Browser")
+            shutil.copyfile(archive, sources / archive.name)
+            repository = Path(__file__).resolve().parents[1]
+            shutil.copyfile(repository / "Documentation/BuildInstructionsLadybird.md", sources / "Building.md")
+            shutil.copyfile(repository / ".github/workflows/thorvg.yml", sources / "thorvg.yml")
+            revision = run("git", "-C", str(repository), "rev-parse", "HEAD").strip()
+            project = os.environ.get("GITHUB_REPOSITORY")
+            checkout = f"https://github.com/{project}/tree/{revision}" if project else f"local checkout at {revision}"
+            (sources / "README.txt").write_text(
+                "Thor Browser uses Ladybird and ThorVG. Published by KarthikeyanRanasthala independently "
+                "of the Ladybird Browser Initiative.\n\n"
+                f"Browser source: {checkout}\n"
+                "third-party-sources.tar contains the matching LGPL library sources. Extract it with "
+                "tar -xf third-party-sources.tar, then extract the individual port archives. Each contains "
+                "the upstream source, the vcpkg build recipe and its patches.\n"
+                "See Building.md and thorvg.yml for the browser build, install and packaging commands. "
+                "To build with a modified library, edit its vcpkg port or add a patched port to the overlay "
+                "in vcpkg-configuration.json before building the dependencies.\n",
+                encoding="utf-8",
+            )
         # Build the HFS+ filesystem without attaching a disk device, including on headless runners.
         raw_image = work / "filesystem.dmg"
         subprocess.run(
@@ -387,7 +412,7 @@ def main() -> int:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.output.suffix == ".dmg":
-        write_disk_image(app, args.output)
+        write_disk_image(app, args.output, args.build_dir)
     else:
         subprocess.run(["tar", "-czf", str(args.output), "-C", str(app.parent), app.name], check=True)
 

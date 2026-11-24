@@ -16,6 +16,14 @@ set(licenses_dependencies
     "${LADYBIRD_SOURCE_DIR}/Meta/CMake/lgpl-libraries.txt"
 )
 
+if (ENABLE_THORVG_RASTERIZER)
+    list(APPEND licenses_arguments --thorvg)
+    list(APPEND licenses_dependencies "${LADYBIRD_SOURCE_DIR}/Meta/Licenses/ThorVG.txt")
+endif()
+if (THOR_BROWSER)
+    list(APPEND licenses_arguments --thor-browser)
+endif()
+
 if (NOT "${VCPKG_INSTALLED_DIR}" STREQUAL "" AND NOT "${VCPKG_TARGET_TRIPLET}" STREQUAL "")
     list(APPEND licenses_arguments
         --vcpkg-installed-dir "${VCPKG_INSTALLED_DIR}"
@@ -80,7 +88,7 @@ add_custom_target(generate_licenses ALL DEPENDS "${LADYBIRD_LICENSES_FILE}")
 
 # The source archives of the LGPL ports, which distribution builds ship as shared libraries, at the addresses that
 # LICENSES.txt of a release names, for the Build Release workflow to hand to release-tools.
-if (LADYBIRD_VCPKG_TYPE STREQUAL "distribution" AND NOT "${VCPKG_INSTALLED_DIR}" STREQUAL "")
+if ((LADYBIRD_VCPKG_TYPE STREQUAL "distribution" OR THOR_BROWSER) AND NOT "${VCPKG_INSTALLED_DIR}" STREQUAL "")
     add_custom_target(third_party_sources
         COMMAND ${Python3_EXECUTABLE} "${licenses_generator}"
             --source-dir "${LADYBIRD_SOURCE_DIR}"

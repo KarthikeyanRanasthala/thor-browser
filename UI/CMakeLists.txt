@@ -9,12 +9,17 @@ if (APPLE)
 
     # Icon Composer icons need the asset catalog compiler from Xcode 26 or later.
     execute_process(COMMAND xcrun actool --version OUTPUT_VARIABLE actool_version ERROR_QUIET)
-    if (actool_version MATCHES "<key>short-bundle-version</key>[ \t\r\n]*<string>([0-9]+)" AND CMAKE_MATCH_1 GREATER_EQUAL 26)
+    if (THOR_BROWSER)
+        set(app_icon_set "${LADYBIRD_SOURCE_DIR}/UI/Icons/thor-browser/app_icon.iconset")
+    else()
+        set(app_icon_set "${LADYBIRD_SOURCE_DIR}/UI/Icons/macos/app_icon.iconset")
+    endif()
+    if (NOT THOR_BROWSER AND actool_version MATCHES "<key>short-bundle-version</key>[ \t\r\n]*<string>([0-9]+)" AND CMAKE_MATCH_1 GREATER_EQUAL 26)
         set(LADYBIRD_COMPILE_ICON_COMPOSER_ICON TRUE)
         set(LADYBIRD_ICON_COMPOSER_PLIST_ENTRY "<key>CFBundleIconName</key>\n        <string>AppIcon</string>")
     else()
         set(LADYBIRD_ICON_COMPOSER_PLIST_ENTRY "")
-        message(STATUS "actool is older than Xcode 26, so the app bundle only gets the flat icon")
+        message(STATUS "Using the flat macOS app icon")
     endif()
 
     set(LADYBIRD_SPARKLE_PLIST_ENTRIES "")
@@ -62,15 +67,15 @@ function(create_ladybird_bundle target_name)
         set(app_icon_images)
         foreach (size IN ITEMS 16 32 128 256 512)
             list(APPEND app_icon_images
-                "${LADYBIRD_SOURCE_DIR}/UI/Icons/macos/app_icon.iconset/icon_${size}x${size}.png"
-                "${LADYBIRD_SOURCE_DIR}/UI/Icons/macos/app_icon.iconset/icon_${size}x${size}@2x.png"
+                "${app_icon_set}/icon_${size}x${size}.png"
+                "${app_icon_set}/icon_${size}x${size}@2x.png"
             )
         endforeach()
         set_property(TARGET ${target_name} APPEND PROPERTY LINK_DEPENDS ${app_icon_images})
 
         add_custom_command(TARGET ${target_name} POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${bundle_dir}/Contents/Resources"
-            COMMAND "iconutil" --convert icns "${LADYBIRD_SOURCE_DIR}/UI/Icons/macos/app_icon.iconset" --output "${bundle_dir}/Contents/Resources/app_icon.icns"
+            COMMAND "iconutil" --convert icns "${app_icon_set}" --output "${bundle_dir}/Contents/Resources/app_icon.icns"
         )
 
         # macOS 26 and later show the Icon Composer icon from the asset catalog, which adapts to the system's icon
@@ -98,6 +103,12 @@ function(create_ladybird_bundle target_name)
                     --errors --warnings --output-format human-readable-text
                 COMMAND "${CMAKE_COMMAND}" -E copy "${asset_catalog_dir}/Assets.car" "${bundle_dir}/Contents/Resources/Assets.car"
                 VERBATIM
+            )
+        endif()
+
+        if (THOR_BROWSER)
+            add_custom_command(TARGET ${target_name} POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E rm -f "${bundle_dir}/Contents/Resources/Assets.car"
             )
         endif()
 

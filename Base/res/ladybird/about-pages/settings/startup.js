@@ -7,9 +7,9 @@ const defaultBrowserStatus = document.querySelector("#default-browser-status");
 const makeDefaultBrowser = document.querySelector("#make-default-browser");
 
 const DEFAULT_BROWSER_STATUS = {
-    default: "Links from other apps open in Ladybird.",
+    default: "Links from other apps open in this browser.",
     "not-default": "Links from other apps open in another browser.",
-    unavailable: "Ladybird cannot determine or set the default browser on this system.",
+    unavailable: "This browser cannot determine or set the default browser on this system.",
 };
 
 let defaultBrowser;

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibCore/BrowserVersion.h>
 #include <LibCore/Environment.h>
 #include <LibURL/InternalURLs.h>
 #include <LibWebCommon/CSS/PreferredContrast.h>
@@ -137,7 +138,7 @@ ApplicationActions::ApplicationActions(PageOptions const& options)
         HubConnection::the().async_view_select_all(view.view_id());
     }));
 
-    m_open_about_page_action = Action::create("About Ladybird"sv, ActionID::OpenAboutPage, [] {
+    m_open_about_page_action = Action::create("About " BROWSER_APP_NAME ""sv, ActionID::OpenAboutPage, [] {
         Application::the().activate_or_open_tab_with_url(URL::about_version());
     });
     m_open_downloads_page_action = Action::create("Downloads"sv, ActionID::ViewDownloads, [] {

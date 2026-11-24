@@ -347,12 +347,14 @@ Download a disk image from your fork’s **Releases** page, open it in Finder, a
 
 | Download | Installed app | Page renderer |
 | --- | --- | --- |
-| `Ladybird-macOS-arm64-ThorVG.dmg` | `Ladybird ThorVG.app` | ThorVG software |
-| `Ladybird-macOS-arm64-ThorVGGL.dmg` | `Ladybird ThorVG GL.app` | ThorVG OpenGL |
+| `Thor-Browser-macOS-arm64-ThorVG.dmg` | `Thor Browser.app` | ThorVG software |
+| `Thor-Browser-macOS-arm64-ThorVGGL.dmg` | `Thor Browser GL.app` | ThorVG OpenGL |
+
+Both disk images include a `Sources` folder with the corresponding LGPL library sources, port recipes, patches and browser rebuild instructions. The installed app displays its notices at `about:licenses`. The software build uses the macOS identifier `sh.karthikeyan.thor-browser` and the OpenGL build uses `sh.karthikeyan.thor-browser.gl`.
 
 These Apple Silicon builds inherit Ladybird’s macOS deployment target, currently 14.4. The disk image preserves the app bundle, its executable permissions, and its libraries. Each variant has its own bundle identifier and profile directory under `~/Library/Application Support/`, named after the app. You can install both alongside the official `Ladybird.app`. Each starts with a fresh profile. The builds are ad hoc signed and lack Apple notarization, so Gatekeeper may block the first launch of a downloaded app.
 
-The [ThorVG macOS builds workflow](../.github/workflows/thorvg.yml) uploads both DMGs as Actions artifacts on pushes to `master`, pull requests, and manual runs. For long-lived downloads, publish a tagged release:
+The [Thor Browser macOS builds workflow](../.github/workflows/thorvg.yml) uploads both DMGs as Actions artifacts on pushes to `master`, pull requests, and manual runs. For long-lived downloads, publish a tagged release:
 
 1. Enable Actions on your fork. To lock published tags and assets, enable **Settings → General → Releases → Enable release immutability** before the first release. [GitHub release immutability](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)
 2. Tag the commit you want to publish. For example, with a Git remote named `fork` pointing at your repository:
@@ -362,7 +364,7 @@ The [ThorVG macOS builds workflow](../.github/workflows/thorvg.yml) uploads both
    git push fork refs/tags/thorvg-v0.1.0
    ```
 
-3. Watch **Actions → ThorVG macOS builds**. A `thorvg-v*` tag push builds both variants on macOS 26 and runs the painter tests. CTest skips the GL framebuffer test when the runner lacks an accelerated pixel format. Packaging checks each binary’s arm64 deployment target. A macOS 15 job mounts both DMGs and loads a local test document headlessly using software painting.
+3. Watch **Actions → Thor Browser macOS builds**. A `thorvg-v*` tag push builds both variants on macOS 26 and runs the painter tests. CTest skips the GL framebuffer test when the runner lacks an accelerated pixel format. Packaging checks each binary’s arm64 deployment target. A macOS 15 job mounts both DMGs and loads a local test document headlessly using software painting.
 4. Once these checks pass, the workflow publishes both images and `SHA256SUMS` on one GitHub Release using the repository’s workflow token. To verify both downloads, put all three files in one directory and run `shasum -a 256 -c SHA256SUMS`. You can rerun a failed release job to complete its draft. Use a new version tag for a subsequent release.
 
 ### Building with limited system memory

@@ -743,7 +743,17 @@ def generate(args: argparse.Namespace) -> str:
         "Ladybird is distributed under the BSD 2-Clause License below. It includes the third-party software listed",
         "after that, under the licenses reproduced with each of them.",
     ]
-    if lgpl and args.release:
+    if args.thor_browser:
+        introduction = [
+            "Thor Browser is based on Ladybird and uses ThorVG for rendering.",
+            "Published by KarthikeyanRanasthala independently of the Ladybird Browser Initiative.",
+            "",
+            "The Sources folder of the Thor Browser disk image contains the build instructions and the",
+            "corresponding source code, build scripts and patches for these LGPL libraries:",
+            "",
+            *[f"  {library}" for library, _ in lgpl],
+        ]
+    elif lgpl and args.release:
         introduction += [
             "",
             "This release of Ladybird uses the following libraries under the GNU Lesser General Public License. The",
@@ -772,6 +782,12 @@ def generate(args: argparse.Namespace) -> str:
     output = ["\n".join(introduction) + "\n"]
     output.append(section("Ladybird", read_text(args.source_dir / "LICENSE")))
 
+    if args.thorvg:
+        output.append(section("ThorVG", read_text(args.source_dir / "Meta/Licenses/ThorVG.txt")))
+        output.append(
+            section("ThorVG CPU rasterizer", "This software is based in part on the work of the FreeType Team.")
+        )
+
     for port in ports:
         output.append(section(f"{port.name} {port.version}", port.copyright))
 
@@ -795,6 +811,8 @@ def main() -> int:
     parser.add_argument("--vcpkg-triplet")
     parser.add_argument("--cargo", default="cargo")
     parser.add_argument("--rust-target")
+    parser.add_argument("--thorvg", action="store_true", help="include the ThorVG and FreeType notices")
+    parser.add_argument("--thor-browser", action="store_true", help="identify the Thor Browser distribution")
     parser.add_argument("--offline", action="store_true")
     parser.add_argument(
         "--release", action="store_true", help="name where release-tools publishes the source of each LGPL port"

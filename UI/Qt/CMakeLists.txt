@@ -285,6 +285,12 @@ if (HAS_DIRECTX)
 endif()
 
 qt_add_executable(ladybird main.cpp ladybird.qrc)
+if (THOR_BROWSER)
+    qt_add_resources(ladybird thor_browser_icon
+        PREFIX "/thor-browser" BASE "${LADYBIRD_SOURCE_DIR}/UI/Icons/thor-browser"
+        FILES "${LADYBIRD_SOURCE_DIR}/UI/Icons/thor-browser/app-browser.png"
+    )
+endif()
 target_link_libraries(ladybird PRIVATE ladybird_impl)
 
 if (LINUX AND NOT BUILD_SHARED_LIBS AND NOT (ENABLE_ADDRESS_SANITIZER OR ENABLE_MEMORY_SANITIZER OR ENABLE_THREAD_SANITIZER OR ENABLE_UNDEFINED_SANITIZER))

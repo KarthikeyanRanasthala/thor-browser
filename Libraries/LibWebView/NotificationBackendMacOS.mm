@@ -46,6 +46,11 @@ static NSString* ns_string(String const& string)
     return [NSString stringWithUTF8String:string.to_byte_string().characters()];
 }
 
+static NSString* web_notification_category()
+{
+    return [NSBundle.mainBundle.bundleIdentifier stringByAppendingString:@".web-notification"];
+}
+
 NotificationBackendMacOS::NotificationBackendMacOS()
     : m_bridge(make<Detail::NotificationCenterBridge>())
 {
@@ -60,7 +65,7 @@ NotificationBackendMacOS::NotificationBackendMacOS()
     m_launch_token = MUST(String::from_utf8(StringView { [[[NSUUID UUID] UUIDString] UTF8String], strlen([[[NSUUID UUID] UUIDString] UTF8String]) }));
 
     // The center reports a user's dismissal only for a category that asks for it.
-    auto* category = [UNNotificationCategory categoryWithIdentifier:@"org.ladybird.Ladybird.web-notification"
+    auto* category = [UNNotificationCategory categoryWithIdentifier:web_notification_category()
                                                             actions:@[]
                                                   intentIdentifiers:@[]
                                                             options:UNNotificationCategoryOptionCustomDismissAction];
@@ -131,7 +136,7 @@ void NotificationBackendMacOS::show(PlatformNotification const& notification)
         content.subtitle = ns_string(notification.attribution);
         content.body = ns_string(platform_text(notification.data.body));
         content.threadIdentifier = ns_string(notification.attribution);
-        content.categoryIdentifier = @"org.ladybird.Ladybird.web-notification";
+        content.categoryIdentifier = web_notification_category();
         if (notification.data.silent != true)
             content.sound = [UNNotificationSound defaultSound];
 

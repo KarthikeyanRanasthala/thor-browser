@@ -18,12 +18,19 @@ list(TRANSFORM 16x16_ICONS PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/icons/16x16/
 list(TRANSFORM 32x32_ICONS PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/icons/32x32/")
 list(TRANSFORM 48x48_ICONS PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/icons/48x48/")
 
+if (THOR_BROWSER)
+    set(48x48_ICONS "${LADYBIRD_SOURCE_DIR}/UI/Icons/thor-browser/app-browser.png")
+endif()
+
 set(INTERNAL_RESOURCES
     ladybird.css
     utils.js
     WebCompat.json
 )
 list(TRANSFORM INTERNAL_RESOURCES PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/ladybird/")
+if (THOR_BROWSER)
+    list(APPEND INTERNAL_RESOURCES "${LADYBIRD_SOURCE_DIR}/UI/Icons/thor-browser/app_icon.iconset/icon_256x256.png")
+endif()
 
 set(ABOUT_PAGES
     about.html

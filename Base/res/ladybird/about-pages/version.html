@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="color-scheme" content="light dark" />
-        <title>About Ladybird</title>
+        <title>About the browser</title>
         <link rel="icon" type="image/png" href="resource://icons/48x48/app-browser.png" />
         <link rel="stylesheet" type="text/css" href="resource://ladybird/ladybird.css" />
         <style>
@@ -17,6 +17,7 @@
             }
 
             .logomark {
+                object-fit: contain;
                 width: 168px;
                 height: 141px;
             }
@@ -161,7 +162,7 @@
             />
         </svg>
         <div class="name">
-            <h1 id="browser-name">Ladybird</h1>
+            <h1 id="browser-name">Browser information</h1>
             <span class="badge" id="release-stage" hidden></span>
         </div>
         <p class="tagline">A truly independent web browser.</p>
@@ -190,7 +191,7 @@
                 </button>
             </div>
             <div class="links">
-                <a href="https://ladybird.org/privacy/" target="_blank">Privacy Policy</a>
+                <a id="upstream-privacy" href="https://ladybird.org/privacy/" target="_blank">Privacy Policy</a>
                 <a href="https://ladybird.org/trademark/" target="_blank">Trademark Policy</a>
                 <a href="about:licenses" target="_blank">Licenses</a>
             </div>
@@ -201,6 +202,16 @@
 
             function renderVersionInfo(versionInfo) {
                 document.title = `About ${versionInfo.productName}`;
+                if (versionInfo.thorBrowser) {
+                    const icon = document.createElement("img");
+                    icon.className = "logomark";
+                    icon.src = "resource://ladybird/icon_256x256.png";
+                    icon.alt = "";
+                    document.querySelector("#upstream-privacy").textContent = "Ladybird Privacy Policy";
+                    document.querySelector(".logomark").replaceWith(icon);
+                    document.querySelector(".tagline").textContent =
+                        "Published by KarthikeyanRanasthala independently of the Ladybird Browser Initiative.";
+                }
                 document.querySelector("#browser-name").innerText = versionInfo.browserName;
                 document.querySelector("#release-stage").innerText = versionInfo.releaseStage || "Development";
                 document.querySelector("#release-stage").hidden = false;
