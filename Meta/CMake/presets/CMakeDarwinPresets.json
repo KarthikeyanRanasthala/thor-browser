@@ -11,6 +11,7 @@
       "cacheVariables": {
         "ENABLE_SKIA": "OFF",
         "ENABLE_THORVG_RASTERIZER": "ON",
+        "LADYBIRD_BASELINE_CPU_TARGET": "ON",
         "LADYBIRD_ENABLE_SPARKLE": "OFF"
       }
     },

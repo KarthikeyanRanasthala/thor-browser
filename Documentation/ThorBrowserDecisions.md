@@ -16,7 +16,7 @@ Last reviewed on 25 November 2026. Thor Browser is an experiment in using ThorVG
 | Software | Thor Browser.app | sh.karthikeyan.thor-browser |
 | OpenGL | Thor Browser GL.app | sh.karthikeyan.thor-browser.gl |
 
-Use the Icelandic red phalarope (þórshani) as the mascot. The approved icon is the head-and-shoulders portrait. Both variants use separate profiles and install alongside upstream Ladybird. Keep upstream's macOS deployment target (14.4 at this revision). These builds target Apple Silicon, use ad hoc signing, and disable Sparkle.
+Use the Icelandic red phalarope (þórshani) as the mascot. The approved icon is the head-and-shoulders portrait. Both variants use separate profiles and install alongside upstream Ladybird. Keep upstream's macOS deployment target (14.4 at this revision) and Apple M1 CPU baseline for distributed C++ and Rust binaries. Host-specific Rust flags on a GitHub macOS VM failed the `ring` crate's compile-time CPU feature checks. Both variants use ad hoc signing and disable Sparkle.
 
 Retain Ladybird's BSD notice, ThorVG's MIT notice, and the FreeType acknowledgment for the CPU rasterizer present in both builds. Identify KarthikeyanRanasthala as the publisher and make independence from the Ladybird Browser Initiative clear. Each DMG carries its own matching LGPL library sources, patches, build recipes, and instructions under `Sources/`. Check the notices and sources again when updating dependencies. [Ladybird trademark policy](https://ladybird.org/trademark/)
 
