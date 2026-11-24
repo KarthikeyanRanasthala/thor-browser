@@ -3,6 +3,7 @@ name: ThorVG macOS builds
 on:
   push:
     branches: [master]
+    tags: ['thorvg-v*']
   pull_request:
   workflow_dispatch:
 
@@ -11,12 +12,15 @@ permissions:
 
 concurrency:
   group: thorvg-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
   build:
+    if: github.event_name != 'push' || !github.event.deleted
     name: macOS arm64 / ${{ matrix.preset }}
     runs-on: macos-26
+    outputs:
+      commit: ${{ steps.checkout.outputs.commit }}
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +38,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7.0.1
+        id: checkout
         with:
           persist-credentials: false
 
@@ -59,8 +64,9 @@ jobs:
         run: |
           brew install meson
           prefix="$RUNNER_TEMP/thorvg"
+          # Keep ThorVG's GL dispatch symbols separate from the system GL calls in the compositor.
           meson setup "$RUNNER_TEMP/thorvg-build" Build/thorvg-src --prefix="$prefix" --libdir=lib \
-            --buildtype=release --default-library=static -Dengines="$ENGINES" -Dloaders= -Dextra=
+            --buildtype=release --default-library=shared -Dengines="$ENGINES" -Dloaders= -Dextra=
           meson install -C "$RUNNER_TEMP/thorvg-build"
           echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
 
@@ -89,11 +95,85 @@ jobs:
         run: |
           cmake --install "$BUILD_DIR" --strip --component ladybird_Runtime --prefix "$RUNNER_TEMP/install"
           python3 Meta/package-macos-test-bundle.py --build-dir "$BUILD_DIR" \
-            --install-dir "$RUNNER_TEMP/install" --output "Ladybird-$PRESET.tar.gz"
+            --extra-dylib "$RUNNER_TEMP/thorvg/lib/libthorvg-1.dylib" \
+            --install-dir "$RUNNER_TEMP/install" --output "Ladybird-macOS-arm64-$PRESET.dmg"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: Ladybird-macOS-arm64-${{ matrix.preset }}
-          path: Ladybird-${{ matrix.preset }}.tar.gz
-          compression-level: 0
+          path: Ladybird-macOS-arm64-${{ matrix.preset }}.dmg
+          archive: false
+          overwrite: true
           if-no-files-found: error
+
+  test-release-images:
+    name: Open release images on macOS 15
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/thorvg-v') && !github.event.deleted
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Ladybird-macOS-arm64-*.dmg
+          path: images
+          merge-multiple: true
+          skip-decompress: true
+
+      - name: Launch the packaged browsers
+        run: |
+          mount="$RUNNER_TEMP/mounted"
+          mkdir "$mount"
+          for preset in ThorVG ThorVGGL; do
+            hdiutil attach -readonly -nobrowse -mountpoint "$mount" "images/Ladybird-macOS-arm64-$preset.dmg"
+            app="Ladybird ThorVG"
+            if [[ "$preset" == ThorVGGL ]]; then app="Ladybird ThorVG GL"; fi
+            test "$(readlink "$mount/Applications")" = /Applications
+            codesign --verify --deep --strict "$mount/$app.app"
+            "$mount/$app.app/Contents/MacOS/Ladybird" --headless=text --temporary-profile --renderer=thorvg \
+              'data:text/html,<p>thorvg-release-smoke</p>' > "$RUNNER_TEMP/page.txt"
+            grep -F 'thorvg-release-smoke' "$RUNNER_TEMP/page.txt"
+            hdiutil detach "$mount"
+            mkdir -p "$mount"
+          done
+
+  release:
+    name: Publish ThorVG release
+    needs: [build, test-release-images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Ladybird-macOS-arm64-*.dmg
+          path: images
+          merge-multiple: true
+          skip-decompress: true
+
+      - name: Publish both disk images
+        working-directory: images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILT_COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          images=(Ladybird-macOS-arm64-ThorVG.dmg Ladybird-macOS-arm64-ThorVGGL.dmg)
+          for image in "${images[@]}"; do test -s "$image"; done
+          sha256sum "${images[@]}" > SHA256SUMS
+
+          tag=$GITHUB_REF_NAME
+          remote_commit=$(gh api "repos/$GH_REPO/commits/$tag" --jq '.sha')
+          if [[ "$remote_commit" != "$BUILT_COMMIT" ]]; then
+            echo "::error::The tag no longer points to the commit built by this run."
+            exit 1
+          fi
+          if draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
+            if [[ "$draft" == false ]]; then
+              echo "Release $tag was already published."
+              exit 0
+            fi
+          else
+            gh release create "$tag" --draft --verify-tag --title "Ladybird ThorVG ${tag#thorvg-v}" --generate-notes
+          fi
+          gh release upload "$tag" "${images[@]}" SHA256SUMS --clobber
+          gh release edit "$tag" --draft=false --verify-tag

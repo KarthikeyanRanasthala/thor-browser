@@ -4,12 +4,12 @@
 #
 # SPDX-License-Identifier: BSD-2-Clause
 
-"""Pack an installed Ladybird.app into a tarball such that it's runnable on a machine other than the one which built it.
+"""Package a self-contained Ladybird.app as a CI tarball or a macOS disk image.
 
 Copy the Qt platform plugin the app loads at run time into the bundle; give every executable bundle-relative rpaths;
 drop absolute ones; copy in the libraries the bundle actually links, Qt included (resolving each @rpath reference the
 way dyld does); re-sign the executables with the entitlements the build gave them; check that nothing still points
-outside the bundle; and tar the result.
+outside the bundle before packaging it.
 
 CI invokes this on the macOS Sanitizer build machine to produce a Ladybird with which we can run the macOS AX tests,
 but on a different machine — without needing to re-build Ladybird on that other machine.
@@ -27,10 +27,12 @@ from __future__ import annotations
 import argparse
 import functools
 import os
+import plistlib
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from pathlib import Path
 from typing import Iterable
@@ -66,7 +68,7 @@ def linked_libraries(binary: Path) -> list[str]:
     """The install names of every library `binary` links, as `otool -L` prints them."""
     names = []
     for line in run("otool", "-L", str(binary)).splitlines()[1:]:
-        match = re.match(r"\s+(\S+) \(", line)
+        match = re.match(r"\s+(.+?) \(compatibility version ", line)
         if match:
             names.append(match.group(1))
     # A dylib's own install name leads its list; a library never links itself. Compare the install name itself, not the
@@ -214,11 +216,22 @@ def fix_rpaths(app: Path) -> list[Path]:
     return rewritten
 
 
-def copy_linked_libraries(app: Path, search_directories: list[Path]) -> list[str]:
+def copy_linked_libraries(app: Path, search_directories: list[Path], extra_dylibs: list[Path]) -> list[str]:
     """Copy every library the bundle links through @rpath but doesn't carry into Contents/lib, transitively."""
     library_directory = app / "Contents" / "lib"
     library_directory.mkdir(parents=True, exist_ok=True)
     copied = []
+    relocated = {}
+    for source in extra_dylibs:
+        original = install_name(source)
+        if original is None:
+            sys.exit(f"error: {source} has no dylib install name")
+        destination = library_directory / source.name
+        shutil.copy2(source, destination)
+        replacement = f"@rpath/{source.name}"
+        run("install_name_tool", "-id", replacement, str(destination))
+        relocated[original] = replacement
+        copied.append(source.name)
     pending = bundle_binaries(app)
     seen = {binary.resolve() for binary in pending}
     while pending:
@@ -226,6 +239,9 @@ def copy_linked_libraries(app: Path, search_directories: list[Path]) -> list[str
         for name in linked_libraries(binary):
             if name.startswith(SYSTEM_LIBRARY_PREFIXES):
                 continue
+            if name in relocated and name != relocated[name]:
+                run("install_name_tool", "-change", name, relocated[name], str(binary))
+                name = relocated[name]
             library = resolve_in_bundle(binary, app, name)
             if library is None:
                 if not name.startswith("@rpath/"):
@@ -299,14 +315,50 @@ def verify(app: Path) -> None:
                 sys.exit(f"error: {binary.relative_to(app)} still links {name}, which isn't in the bundle")
 
 
+def write_disk_image(app: Path, output: Path) -> None:
+    def version_components(version: str) -> tuple[int, ...]:
+        return tuple(map(int, (version.split(".") + ["0", "0"])[:3]))
+
+    with (app / "Contents/Info.plist").open("rb") as stream:
+        info = plistlib.load(stream)
+    name = info["CFBundleDisplayName"]
+    minimum_version = version_components(info["LSMinimumSystemVersion"])
+    for binary in bundle_binaries(app):
+        build_info = run("vtool", "-arch", "arm64", "-show-build", str(binary))
+        minimum = re.search(r"^\s*minos (\d+(?:\.\d+)*)", build_info, re.MULTILINE)
+        if not minimum or version_components(minimum[1]) > minimum_version:
+            sys.exit(f"error: {binary} has an incompatible arm64 deployment target:\n{build_info}")
+
+    with tempfile.TemporaryDirectory(dir=output.parent) as temporary:
+        work = Path(temporary)
+        contents = work / "contents"
+        contents.mkdir()
+        subprocess.run(["ditto", app, contents / f"{name}.app"], check=True)
+        (contents / "Applications").symlink_to("/Applications")
+        # Build the HFS+ filesystem without attaching a disk device, including on headless runners.
+        raw_image = work / "filesystem.dmg"
+        subprocess.run(
+            ["hdiutil", "makehybrid", "-hfs", "-hfs-volume-name", name, "-o", raw_image, contents], check=True
+        )
+        image = work / "compressed.dmg"
+        subprocess.run(["hdiutil", "convert", raw_image, "-format", "UDZO", "-o", image], check=True)
+        subprocess.run(["hdiutil", "verify", image], check=True)
+        image.replace(output)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--build-dir", required=True, type=Path, help="the CMake build directory the app was built in")
     parser.add_argument(
         "--install-dir", required=True, type=Path, help="the prefix `cmake --install --strip` installed into"
     )
-    parser.add_argument("--output", required=True, type=Path, help="the .tar.gz to write, holding Ladybird.app")
+    parser.add_argument("--output", required=True, type=Path, help="the .tar.gz or Apple Silicon .dmg to write")
+    parser.add_argument(
+        "--extra-dylib", action="append", default=[], type=Path, help="bundle a dylib with a build-machine install name"
+    )
     args = parser.parse_args()
+    if not args.output.name.endswith((".dmg", ".tar.gz")):
+        parser.error("--output must end in .dmg or .tar.gz")
 
     app = args.install_dir / "bundle" / "Ladybird.app"
     built_app_binary = args.build_dir / "bin" / "Ladybird.app" / "Contents" / "MacOS" / "Ladybird"
@@ -328,13 +380,16 @@ def main() -> int:
     # copied, since vcpkg's dylibs can carry absolute rpaths of their own.
     deploy_qt(app, find_qt_plugins_directory(search_directories))
     rewritten = fix_rpaths(app)
-    copied = copy_linked_libraries(app, search_directories)
+    copied = copy_linked_libraries(app, search_directories, args.extra_dylib)
     rewritten += fix_rpaths(app)
     resigned = resign(app, args.build_dir)
     verify(app)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["tar", "-czf", str(args.output), "-C", str(app.parent), app.name], check=True)
+    if args.output.suffix == ".dmg":
+        write_disk_image(app, args.output)
+    else:
+        subprocess.run(["tar", "-czf", str(args.output), "-C", str(app.parent), app.name], check=True)
 
     size = os.path.getsize(args.output) / (1024 * 1024)
     print(f"rewrote the rpaths of {len(rewritten)} binaries")

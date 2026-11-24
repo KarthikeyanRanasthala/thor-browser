@@ -64,6 +64,12 @@ else()
 endif()
 
 if (ENABLE_THORVG_GL)
+    # ThorVG's private GL dispatch table defines symbols such as glGetString. Linking its archive
+    # into the compositor would resolve our system GL function calls to those data symbols.
+    get_target_property(thorvg_link_libraries PkgConfig::ThorVG INTERFACE_LINK_LIBRARIES)
+    if (thorvg_link_libraries MATCHES "libthorvg-1\\.a(;|$)")
+        message(FATAL_ERROR "The ThorVG OpenGL compositor requires a shared ThorVG library (--default-library=shared)")
+    endif()
     target_sources(compositorservice PRIVATE ThorVGGLTarget.cpp)
     target_compile_definitions(compositorservice PUBLIC ENABLE_THORVG_GL=1)
     target_link_libraries(compositorservice PRIVATE "-framework OpenGL" "-framework IOSurface")

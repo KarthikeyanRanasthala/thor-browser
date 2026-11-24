@@ -8,6 +8,7 @@
 #include <AK/Hex.h>
 #include <AK/LexicalPath.h>
 #include <AK/Random.h>
+#include <LibCore/BrowserVersion.h>
 #include <LibCore/Directory.h>
 #include <LibCrypto/Hash/Hash.h>
 #include <LibFileSystem/FileSystem.h>
@@ -17,7 +18,7 @@ namespace WebView {
 
 static ByteString profile_path(StringView root, StringView identifier)
 {
-    return LexicalPath::join(root, "Ladybird"sv, "Profiles"sv, identifier).string();
+    return LexicalPath::join(root, BROWSER_APP_NAME ""sv, "Profiles"sv, identifier).string();
 }
 
 static ErrorOr<void> create_profile_directories(ProfilePaths const& paths)
@@ -161,11 +162,11 @@ ErrorOr<Profile> Profile::create(ProfileSelection const& selection, ProfileRoots
 ErrorOr<Profile> Profile::create_legacy(ProfileRoots const& roots)
 {
     ProfilePaths paths {
-        .config = LexicalPath::join(roots.config, "Ladybird"sv).string(),
-        .data = LexicalPath::join(roots.data, "Ladybird"sv).string(),
-        .cache = LexicalPath::join(roots.cache, "Ladybird"sv).string(),
+        .config = LexicalPath::join(roots.config, BROWSER_APP_NAME ""sv).string(),
+        .data = LexicalPath::join(roots.data, BROWSER_APP_NAME ""sv).string(),
+        .cache = LexicalPath::join(roots.cache, BROWSER_APP_NAME ""sv).string(),
         .runtime = roots.runtime,
-        .identity = LexicalPath::join(roots.data, "Ladybird"sv).string(),
+        .identity = LexicalPath::join(roots.data, BROWSER_APP_NAME ""sv).string(),
     };
 
     TRY(create_profile_directories(paths));

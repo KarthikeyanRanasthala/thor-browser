@@ -8,6 +8,7 @@
 #include <AK/ByteString.h>
 #include <AK/LexicalPath.h>
 #include <AK/NeverDestroyed.h>
+#include <LibCore/BrowserVersion.h>
 #include <LibCore/ConfigFile.h>
 #include <LibCore/Directory.h>
 #include <LibCore/Environment.h>
@@ -60,7 +61,7 @@ static constexpr auto USER_CHROME_CSS = R"~~~(
 
 static LexicalPath const& profile_directory()
 {
-    static NeverDestroyed<LexicalPath> path = LexicalPath::join(Core::StandardPaths::user_data_directory(), "Ladybird"sv, "DevTools"sv, "firefox-profile"sv);
+    static NeverDestroyed<LexicalPath> path = LexicalPath::join(Core::StandardPaths::user_data_directory(), BROWSER_APP_NAME ""sv, "DevTools"sv, "firefox-profile"sv);
     return *path;
 }
 

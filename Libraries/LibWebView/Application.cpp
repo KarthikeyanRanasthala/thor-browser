@@ -15,6 +15,7 @@
 #include <AK/Time.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibCore/ArgsParser.h>
+#include <LibCore/BrowserVersion.h>
 #include <LibCore/Directory.h>
 #include <LibCore/Environment.h>
 #include <LibCore/File.h>
@@ -839,7 +840,7 @@ ErrorOr<void> Application::create_profile([[maybe_unused]] Optional<StringView> 
     profile_roots.cache = LexicalPath { profile_roots.cache }.parent().string();
 #endif
 
-    m_instance_data_directory = LexicalPath::join(profile_roots.data, "Ladybird"sv).string();
+    m_instance_data_directory = LexicalPath::join(profile_roots.data, BROWSER_APP_NAME ""sv).string();
 
 #if defined(AK_OS_ANDROID)
     m_profile = TRY(Profile::create_legacy(profile_roots));
