@@ -90,6 +90,7 @@ enum class ProfileTool {
 
 struct BrowserOptions {
     bool use_thorvg { false };
+    bool use_thorvg_gl { false };
     Vector<String> additional_font_directories {};
     Vector<URL::URL> urls;
     Vector<ByteString> raw_urls;

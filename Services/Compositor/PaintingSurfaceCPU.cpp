@@ -7,6 +7,11 @@
 #include <LibGfx/AffineTransform.h>
 #include <LibGfx/Bitmap.h>
 
+#ifdef ENABLE_THORVG_GL
+#    include <Compositor/ThorVGGLTarget.h>
+#    include <LibGfx/SharedImageBuffer.h>
+#endif
+
 namespace Gfx {
 
 struct PaintingSurface::Impl {
@@ -19,6 +24,9 @@ struct PaintingSurface::Impl {
     State state;
     Vector<State> stack;
     Function<void(PaintingSurface&)> on_flush;
+#ifdef ENABLE_THORVG_GL
+    OwnPtr<Compositor::ThorVGGLTarget> gl_target {};
+#endif
 };
 
 void PaintingSurface::destroy_impl(void* impl) { delete static_cast<Impl*>(impl); }
@@ -26,11 +34,39 @@ PaintingSurface::Impl& PaintingSurface::impl() const { return *static_cast<Impl*
 NonnullRefPtr<PaintingSurface> PaintingSurface::wrap_bitmap(Bitmap& bitmap, TextAntialiasing)
 {
     auto impl = make<Impl>(NonnullRefPtr { bitmap }, Impl::State { {}, bitmap.rect() }, Vector<Impl::State> {}, nullptr);
-    return adopt_ref(const_cast<PaintingSurface&>(*Compositor::RustFFI::compositor_painting_surface_create(bitmap.size(), nullptr, impl.leak_ptr(), destroy_impl)));
+    return adopt_impl(bitmap.size(), move(impl));
 }
+
+NonnullRefPtr<PaintingSurface> PaintingSurface::adopt_impl(IntSize size, NonnullOwnPtr<Impl> impl)
+{
+    void const* context = nullptr;
+#ifdef ENABLE_THORVG_GL
+    if (impl->gl_target)
+        context = Compositor::ThorVGGLTarget::context_identity();
+#endif
+    return adopt_ref(const_cast<PaintingSurface&>(*Compositor::RustFFI::compositor_painting_surface_create(size, context, impl.leak_ptr(), destroy_impl)));
+}
+
+#ifdef ENABLE_THORVG_GL
+ErrorOr<NonnullRefPtr<PaintingSurface>> PaintingSurface::wrap_shared_gl_buffer(SharedImageBuffer& buffer)
+{
+    auto bitmap = buffer.bitmap();
+    auto target = TRY(Compositor::ThorVGGLTarget::create(buffer.iosurface_handle(), bitmap->size()));
+    auto impl = make<Impl>(bitmap, Impl::State { {}, bitmap->rect() }, Vector<Impl::State> {}, nullptr, move(target));
+    return adopt_impl(bitmap->size(), move(impl));
+}
+
+Compositor::ThorVGGLTarget const* PaintingSurface::gl_target() const { return impl().gl_target.ptr(); }
+#endif
 
 ErrorOr<NonnullRefPtr<PaintingSurface>> PaintingSurface::try_create_with_size(IntSize size, BitmapFormat format, AlphaType alpha, RefPtr<SkiaBackendContext>, ColorSpace const&, TextAntialiasing aa)
 {
+#ifdef ENABLE_THORVG_GL
+    if (Compositor::ThorVGGLTarget::enabled() && format == BitmapFormat::BGRA8888 && alpha == AlphaType::Premultiplied) {
+        auto buffer = TRY(SharedImageBuffer::try_create(size));
+        return wrap_shared_gl_buffer(buffer);
+    }
+#endif
     auto bitmap = TRY(Bitmap::create(format, alpha, size));
     return wrap_bitmap(*bitmap, aa);
 }
@@ -62,7 +98,14 @@ IntRect PaintingSurface::rect() const { return impl().bitmap->rect(); }
 IntSize PaintingSurface::size() const { return impl().bitmap->size(); }
 void PaintingSurface::notify_content_will_change() { }
 RefPtr<SkiaBackendContext> PaintingSurface::skia_backend_context() const { return {}; }
-bool PaintingSurface::wraps_shared_image() const { return false; }
+bool PaintingSurface::wraps_shared_image() const
+{
+#ifdef ENABLE_THORVG_GL
+    return gl_target() != nullptr;
+#else
+    return false;
+#endif
+}
 void PaintingSurface::set_on_flush(Function<void(PaintingSurface&)> callback) { impl().on_flush = move(callback); }
 void PaintingSurface::flush()
 {
@@ -97,8 +140,28 @@ static void copy_pixels(Bitmap& target, Bitmap const& source, IntPoint offset)
         }
     }
 }
-void PaintingSurface::read_into_bitmap(Bitmap& bitmap, IntPoint origin, ColorSpace const&) const { copy_pixels(bitmap, *backing_bitmap(), { -origin.x(), -origin.y() }); }
-void PaintingSurface::write_from_bitmap(Bitmap const& bitmap, IntPoint position, ColorSpace const&) { copy_pixels(*backing_bitmap(), bitmap, position); }
-void PaintingSurface::copy_from_surface(PaintingSurface& source) { write_from_bitmap(*source.backing_bitmap()); }
+void PaintingSurface::read_into_bitmap(Bitmap& bitmap, IntPoint origin, ColorSpace const&) const
+{
+#ifdef ENABLE_THORVG_GL
+    Compositor::ScopedThorVGPixelAccess access(gl_target(), true);
+#endif
+    copy_pixels(bitmap, *backing_bitmap(), { -origin.x(), -origin.y() });
+}
+void PaintingSurface::write_from_bitmap(Bitmap const& bitmap, IntPoint position, ColorSpace const&)
+{
+#ifdef ENABLE_THORVG_GL
+    Compositor::ScopedThorVGPixelAccess access(gl_target(), false);
+#endif
+    copy_pixels(*backing_bitmap(), bitmap, position);
+}
+void PaintingSurface::copy_from_surface(PaintingSurface& source)
+{
+    if (this == &source)
+        return;
+#ifdef ENABLE_THORVG_GL
+    Compositor::ScopedThorVGPixelAccess access(source.gl_target(), true);
+#endif
+    write_from_bitmap(*source.backing_bitmap());
+}
 
 }

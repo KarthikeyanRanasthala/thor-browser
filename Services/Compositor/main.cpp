@@ -9,12 +9,15 @@
 #    include <Compositor/DisplayListPlayerThorVG.h>
 #endif
 #include <Compositor/ConnectionFromClient.h>
-#ifndef LADYBIRD_CPU_ONLY
+#ifndef LADYBIRD_WITHOUT_SKIA
 #include <Compositor/FontSkia.h>
 #endif
 #include <Compositor/MainDispatchQueue.h>
 #include <Compositor/Sandbox.h>
 #include <Compositor/SkiaBackendContext.h>
+#ifdef ENABLE_THORVG_GL
+#    include <Compositor/ThorVGGLTarget.h>
+#endif
 #include <LibCore/ArgsParser.h>
 #include <LibCore/CrashHandler.h>
 #include <LibCore/EventLoop.h>
@@ -63,6 +66,10 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     bool use_thorvg = false;
     args_parser.add_option(use_thorvg, "Use ThorVG for page rendering", "thorvg");
 #endif
+#ifdef ENABLE_THORVG_GL
+    bool use_thorvg_gl = false;
+    args_parser.add_option(use_thorvg_gl, "Use ThorVG OpenGL for page rendering", "thorvg-gl");
+#endif
     args_parser.parse(arguments);
 #ifdef ENABLE_THORVG_RASTERIZER
     Compositor::DisplayListPlayerThorVG::set_enabled(use_thorvg);
@@ -76,6 +83,10 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     PlatformFeatures::ProcessFeatures::initialize_for_current_process(TRY(PlatformFeatures::ProcessFeatures::from_string(PlatformFeatures::FeatureProcess::Compositor, platform_features)));
     [[maybe_unused]] auto const& features = PlatformFeatures::ProcessFeatures::the();
 
+#ifdef ENABLE_THORVG_GL
+    if (use_thorvg_gl && features.is_enabled(PlatformFeatures::Feature::GpuPainting))
+        TRY(Compositor::ThorVGGLTarget::initialize());
+#endif
     Optional<Gfx::GpuDeviceIdentity> preferred_gpu_device;
     if (!gpu_device.is_empty()) {
         preferred_gpu_device = Gfx::GpuDeviceIdentity::from_string(gpu_device);
@@ -107,13 +118,13 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     if (auto result = Core::Platform::set_current_thread_qos(Core::Platform::ThreadQoS::UserInteractive); result.is_error())
         warnln("Could not set main thread QoS: {}", result.error());
 
-#ifndef LADYBIRD_CPU_ONLY
+#ifndef LADYBIRD_WITHOUT_SKIA
     if (enable_test_mode)
         Compositor::use_test_font_rendering();
 #endif
 
     Core::ResourceImplementation::install(make<Core::ResourceImplementationFile>(TRY(String::from_utf8(resource_root))));
-#ifndef LADYBIRD_CPU_ONLY
+#ifndef LADYBIRD_WITHOUT_SKIA
     if (force_fontconfig)
         Compositor::set_font_rasterizer(Compositor::FontRasterizer::FreeType);
 #endif
@@ -125,7 +136,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         TRY(Compositor::restrict_filesystem(resource_root));
 #endif
 
-#ifndef LADYBIRD_CPU_ONLY
+#ifndef LADYBIRD_WITHOUT_SKIA
     if (features.is_enabled(PlatformFeatures::Feature::GpuPainting))
         Gfx::SkiaBackendContext::initialize_gpu_backend(preferred_gpu_device);
     auto skia_backend_context = Gfx::SkiaBackendContext::the_main_thread_context();
@@ -155,9 +166,12 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
 
     if (stats_log)
         stats_log->start_sampling([](JsonObject& values) {
-#ifndef LADYBIRD_CPU_ONLY
+#ifndef LADYBIRD_WITHOUT_SKIA
             if (auto context = Gfx::SkiaBackendContext::the_main_thread_context())
                 values.set("gpu.skia_resource_cache_bytes"sv, context->resource_cache_bytes());
+#elif defined(ENABLE_THORVG_GL)
+            if (Compositor::ThorVGGLTarget::enabled())
+                values.set("gpu.thorvg_painted_passes"sv, Compositor::ThorVGGLTarget::painted_passes());
 #else
             (void)values;
 #endif

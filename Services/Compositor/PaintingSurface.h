@@ -39,6 +39,12 @@ class D3DSharedTexture;
 #    include <LibGfx/MetalContext.h>
 #endif
 
+#ifdef ENABLE_THORVG_GL
+namespace Compositor {
+class ThorVGGLTarget;
+}
+#endif
+
 class SkCanvas;
 class SkSurface;
 
@@ -92,6 +98,10 @@ public:
 
     void notify_content_will_change();
 
+#ifdef ENABLE_THORVG_GL
+    static ErrorOr<NonnullRefPtr<PaintingSurface>> wrap_shared_gl_buffer(SharedImageBuffer&);
+    Compositor::ThorVGGLTarget const* gl_target() const;
+#endif
     Bitmap* backing_bitmap() const;
     IntSize size() const;
     IntRect rect() const;
@@ -104,7 +114,7 @@ public:
     IntRect device_clip() const;
     FloatMatrix4x4 paint_matrix() const;
 
-#ifndef LADYBIRD_CPU_ONLY
+#ifndef LADYBIRD_WITHOUT_SKIA
     SkCanvas& canvas() const;
     SkSurface& sk_surface() const;
 

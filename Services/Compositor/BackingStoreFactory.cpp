@@ -8,6 +8,9 @@
 #include <Compositor/BackingStoreFactory.h>
 #include <Compositor/PaintingSurface.h>
 #include <Compositor/SkiaBackendContext.h>
+#ifdef ENABLE_THORVG_GL
+#    include <Compositor/ThorVGGLTarget.h>
+#endif
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/SharedImageBuffer.h>
 
@@ -35,9 +38,9 @@ static NonnullRefPtr<Gfx::PaintingSurface> create_gpu_painting_surface_with_bitm
 }
 #endif
 
-static NonnullRefPtr<Gfx::PaintingSurface> create_shareable_bitmap_backing_store([[maybe_unused]] Gfx::IntSize size, Gfx::SharedImageBuffer& buffer, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context)
+static ErrorOr<NonnullRefPtr<Gfx::PaintingSurface>> create_shareable_bitmap_backing_store([[maybe_unused]] Gfx::IntSize size, Gfx::SharedImageBuffer& buffer, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context)
 {
-#if defined(AK_OS_MACOS) && !defined(LADYBIRD_CPU_ONLY)
+#if defined(AK_OS_MACOS) && !defined(LADYBIRD_WITHOUT_SKIA)
     if (skia_backend_context)
         return Gfx::PaintingSurface::create_from_shared_image_buffer(buffer, *skia_backend_context);
 #else
@@ -49,6 +52,10 @@ static NonnullRefPtr<Gfx::PaintingSurface> create_shareable_bitmap_backing_store
 #    endif
 #endif
 
+#ifdef ENABLE_THORVG_GL
+    if (ThorVGGLTarget::enabled())
+        return Gfx::PaintingSurface::wrap_shared_gl_buffer(buffer);
+#endif
     return Gfx::PaintingSurface::wrap_bitmap(*buffer.bitmap(), Gfx::PaintingSurface::TextAntialiasing::LCD);
 }
 
@@ -119,7 +126,7 @@ static ErrorOr<GpuBackingStore> create_shared_gpu_backing_store(Gfx::IntSize siz
 static ErrorOr<NewBackingStore> create_shared_bitmap_backing_store(Gfx::IntSize size, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context)
 {
     auto shared_image_buffer = make<Gfx::SharedImageBuffer>(Gfx::SharedImageBuffer::create(size));
-    auto surface = create_shareable_bitmap_backing_store(size, *shared_image_buffer, skia_backend_context);
+    auto surface = TRY(create_shareable_bitmap_backing_store(size, *shared_image_buffer, skia_backend_context));
     auto shared_image = shared_image_buffer->export_shared_image();
     return NewBackingStore {
         .surface = move(surface),
@@ -150,6 +157,10 @@ static ErrorOr<NewBackingStore> create_shared_gpu_image_backing_store([[maybe_un
         .shared_image_buffer = nullptr,
         .shared_image = move(store.shared_image),
     };
+#elif defined(ENABLE_THORVG_GL)
+    if (ThorVGGLTarget::enabled())
+        return create_shared_bitmap_backing_store(size, skia_backend_context);
+    return Error::from_string_literal("ThorVG OpenGL is disabled");
 #else
     return Error::from_string_literal("Shared GPU images are not supported on this platform");
 #endif

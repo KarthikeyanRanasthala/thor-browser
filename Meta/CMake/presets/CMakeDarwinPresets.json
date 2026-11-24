@@ -13,6 +13,14 @@
         "ENABLE_THORVG_RASTERIZER": "ON",
         "LADYBIRD_ENABLE_SPARKLE": "OFF"
       }
+    },
+    {
+      "name": "ThorVGGL",
+      "inherits": "ThorVG",
+      "binaryDir": "${sourceDir}/Build/thorvg-gl",
+      "cacheVariables": {
+        "ENABLE_THORVG_GL": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -20,6 +28,11 @@
       "name": "ThorVG",
       "inherits": "base",
       "configurePreset": "ThorVG"
+    },
+    {
+      "name": "ThorVGGL",
+      "inherits": "base",
+      "configurePreset": "ThorVGGL"
     }
   ]
 }

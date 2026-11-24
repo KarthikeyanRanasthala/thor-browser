@@ -325,6 +325,22 @@ open -n Build/thorvg/bin/Ladybird.app --args --temporary-profile https://www.goo
 
 To build both rasterizers, configure the Release preset with `-DENABLE_THORVG_RASTERIZER=ON`. Select the Skia page painter at runtime with `--renderer=skia`.
 
+### Experimental ThorVG OpenGL page painting on macOS
+
+The `ThorVGGL` preset defaults to `--renderer=thorvg-gl`. Build ThorVG with both the desktop OpenGL and software engines, then build the browser and its framebuffer test. From the Ladybird checkout:
+
+```sh
+export MACOSX_DEPLOYMENT_TARGET=14.4
+meson setup ../thorvg/build-gl ../thorvg --buildtype=release -Dengines=cpu,gl -Dloaders= -Dextra= --prefix="$PWD/../thorvg/build-gl/install"
+meson install -C ../thorvg/build-gl
+export PKG_CONFIG_PATH="$PWD/../thorvg/build-gl/install/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+python3 Meta/ladybird.py build --preset ThorVGGL -j 10 Ladybird TestThorVGGL
+ctest --test-dir Build/thorvg-gl -R '^TestThorVGGL$' --output-on-failure
+open -n Build/thorvg-gl/bin/Ladybird.app --args --temporary-profile --renderer=thorvg-gl
+```
+
+The compositor creates an accelerated OpenGL 4.1 context and paints into BGRA IOSurfaces. The Rust tile compositor can clear these buffers and copy tiles between framebuffers on the GPU. Each GPU operation completes synchronously before Ladybird reuses or presents the shared pixels. Ordinary bitmap snapshots use the software painter. Video conversion and some intermediate image copies still run on the CPU. With `--stats-log-dir`, the compositor reports completed GL painting passes as `gpu.thorvg_painted_passes`. The GPU test needs access to the macOS graphics device. To select software page painting in this build, use `--renderer=thorvg`.
+
 ### Building with limited system memory
 
 The default build mode will run as many build steps in parallel as possible, which includes link steps;

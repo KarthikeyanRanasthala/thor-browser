@@ -9,7 +9,7 @@
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
 
-#ifndef LADYBIRD_CPU_ONLY
+#ifndef LADYBIRD_WITHOUT_SKIA
 #    include <Compositor/FontSkia.h>
 #    include <core/SkFont.h>
 #    include <core/SkFontMetrics.h>
@@ -25,7 +25,7 @@ ContextRasterTargets::ContextRasterTargets(OwnedCanvasSurfaces canvas_surfaces)
 
 void ContextRasterTargets::retain_only_fonts(ReadonlySpan<u64> font_ids)
 {
-#ifdef LADYBIRD_CPU_ONLY
+#ifdef LADYBIRD_WITHOUT_SKIA
     (void)m_fonts.retain_only(font_ids);
 #else
     m_raster_cache.forget_fonts(m_fonts.retain_only(font_ids));
@@ -34,7 +34,7 @@ void ContextRasterTargets::retain_only_fonts(ReadonlySpan<u64> font_ids)
 
 void ContextRasterTargets::retain_only_image_frames(ReadonlySpan<u64> image_frame_ids)
 {
-#ifdef LADYBIRD_CPU_ONLY
+#ifdef LADYBIRD_WITHOUT_SKIA
     (void)m_image_frames.retain_only(image_frame_ids);
 #else
     m_raster_cache.forget_image_frames(m_image_frames.retain_only(image_frame_ids));
@@ -64,7 +64,7 @@ Optional<OverlayLabel> ContextRasterTargets::shape_overlay_label(Optional<String
     if (!font)
         return {};
     OverlayLabel label {};
-#ifdef LADYBIRD_CPU_ONLY
+#ifdef LADYBIRD_WITHOUT_SKIA
     for (auto code_point : Utf8View(text)) {
         label.glyph_ids.append(font->glyph_id_for_code_point(code_point));
         label.glyph_x_positions.append(label.width);
@@ -106,7 +106,7 @@ bool ContextRasterTargets::set_drawn_video_sinks(ReadonlySpan<u64> handles)
     for (auto handle : m_drawn_video_sinks) {
         if (drawn_video_sinks.contains(handle))
             continue;
-#ifndef LADYBIRD_CPU_ONLY
+#ifndef LADYBIRD_WITHOUT_SKIA
         m_raster_cache.forget_video_sink(handle);
 #endif
         changed = true;

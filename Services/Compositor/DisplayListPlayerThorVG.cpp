@@ -14,13 +14,16 @@
 #include <LibGfx/Matrix4x4.h>
 #include <LibGfx/PathData.h>
 #include <algorithm>
+#ifdef ENABLE_THORVG_GL
+#    include <Compositor/ThorVGGLTarget.h>
+#endif
 
 namespace Compositor {
 
 using namespace Compositing;
 namespace Replay = Compositing::RustFFI;
 
-#ifdef LADYBIRD_CPU_ONLY
+#ifdef LADYBIRD_WITHOUT_SKIA
 void DisplayListPlayerThorVG::set_enabled(bool) { }
 bool DisplayListPlayerThorVG::enabled() { return true; }
 #else
@@ -155,7 +158,12 @@ struct DisplayListPlayerThorVG::Impl {
     };
     Vector<State> stack;
     State state;
-    std::unique_ptr<tvg::SwCanvas> canvas;
+    std::unique_ptr<tvg::SwCanvas> software_canvas;
+    tvg::Canvas* canvas { nullptr };
+#ifdef ENABLE_THORVG_GL
+    std::unique_ptr<tvg::GlCanvas> gl_canvas;
+    ThorVGGLTarget const* gl_target { nullptr };
+#endif
     DrawnFonts const* fonts {};
     DrawnImageFrames const* images {};
     HashMap<unsigned, unsigned> skipped;
@@ -175,10 +183,29 @@ struct DisplayListPlayerThorVG::Impl {
         auto* bitmap = surface.backing_bitmap();
         VERIFY(bitmap && thorvg_runtime_ready());
         surface.notify_content_will_change();
-        canvas.reset(tvg::SwCanvas::gen());
-        VERIFY(canvas && canvas->target(bitmap->begin(), bitmap->pitch() / 4, bitmap->width(), bitmap->height(), pixel_format(bitmap->format(), bitmap->alpha_type())) == tvg::Result::Success);
+#ifdef ENABLE_THORVG_GL
+        gl_target = surface.gl_target();
+        if (gl_target) {
+            if (!gl_canvas)
+                gl_canvas.reset(tvg::GlCanvas::gen());
+            VERIFY(gl_canvas && gl_target->bind(*gl_canvas));
+            canvas = gl_canvas.get();
+        } else
+#endif
+        {
+            software_canvas.reset(tvg::SwCanvas::gen());
+            VERIFY(software_canvas && software_canvas->target(bitmap->begin(), bitmap->pitch() / 4, bitmap->width(), bitmap->height(), pixel_format(bitmap->format(), bitmap->alpha_type())) == tvg::Result::Success);
+            canvas = software_canvas.get();
+        }
         state = { tvg::Scene::gen(), surface.paint_matrix(), false };
         auto clip = surface.device_clip();
+#ifdef ENABLE_THORVG_GL
+        if (gl_target) {
+            // GL row zero is the bottom of its viewport and the first row of the shared bitmap.
+            state.scene->transform({ 1, 0, 0, 0, -1, static_cast<float>(bitmap->height()), 0, 0, 1 });
+            clip.set_y(bitmap->height() - clip.bottom());
+        }
+#endif
         if (clip.is_empty())
             state.hidden = true;
         else
@@ -193,9 +220,22 @@ struct DisplayListPlayerThorVG::Impl {
             auto status = canvas->draw(false);
             if (status != tvg::Result::Success)
                 dbgln("ThorVG page draw failed ({})", static_cast<int>(status));
-            canvas->sync();
+            auto sync_status = canvas->sync();
+            if (sync_status != tvg::Result::Success)
+                dbgln("ThorVG page sync failed ({})", static_cast<int>(sync_status));
+#ifdef ENABLE_THORVG_GL
+            if (gl_target)
+                gl_target->finish_paint(status == tvg::Result::Success && sync_status == tvg::Result::Success);
+#endif
         }
-        canvas.reset();
+#ifdef ENABLE_THORVG_GL
+        if (gl_target) {
+            gl_canvas->remove();
+            gl_target = nullptr;
+        }
+#endif
+        software_canvas.reset();
+        canvas = nullptr;
         state = {};
         has_draws = false;
     }
@@ -339,6 +379,9 @@ struct DisplayListPlayerThorVG::Impl {
 
     void surface(Gfx::PaintingSurface const& surface, Gfx::FloatRect src, Gfx::FloatRect dst)
     {
+#ifdef ENABLE_THORVG_GL
+        ScopedThorVGPixelAccess access(surface.gl_target(), true);
+#endif
         if (auto* bmp = surface.backing_bitmap())
             pixels(bmp->begin(), bmp->pitch() / 4, bmp->width(), bmp->height(), pixel_format(bmp->format(), bmp->alpha_type()), src, dst);
     }
@@ -637,6 +680,12 @@ void DisplayListPlayerThorVG::end()
 
 void DisplayListPlayerThorVG::clear(Gfx::PaintingSurface& surface, Gfx::Color color)
 {
+#ifdef ENABLE_THORVG_GL
+    if (auto* target = surface.gl_target()) {
+        target->clear(surface.device_clip(), color);
+        return;
+    }
+#endif
     auto& bitmap = *surface.backing_bitmap();
     auto area = surface.device_clip();
     area.intersect(bitmap.rect());
@@ -652,6 +701,13 @@ void DisplayListPlayerThorVG::clear(Gfx::PaintingSurface& surface, Gfx::Color co
 
 void DisplayListPlayerThorVG::blit(Gfx::PaintingSurface& target, Gfx::PaintingSurface const& source, Gfx::IntRect src, Gfx::IntRect dst, bool replace)
 {
+#ifdef ENABLE_THORVG_GL
+    // The tile compositor's Source copies have integer device coordinates. Keep the whole copy on the GPU.
+    if (replace && &target != &source && target.gl_target() && source.gl_target() && target.paint_matrix().is_identity() && source.rect().contains(src) && src.size() == dst.size()) {
+        target.gl_target()->copy_from(*source.gl_target(), src, dst, target.device_clip());
+        return;
+    }
+#endif
     Impl painter;
     painter.open(target);
     painter.surface(source, Gfx::FloatRect(src), Gfx::FloatRect(dst));

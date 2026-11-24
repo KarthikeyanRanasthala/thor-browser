@@ -482,7 +482,7 @@ JS::ThrowCompletionOr<HTML::OffscreenRenderingContext> get_context(HTML::Offscre
     // NOTE: See the spec for the full table.
     TRY(offscreen_canvas.throw_if_detached());
 
-#ifdef LADYBIRD_CPU_ONLY
+#ifdef LADYBIRD_WITHOUT_SKIA
     if (context_id == OffscreenRenderingContextId::_2d || context_id == OffscreenRenderingContextId::Webgl || context_id == OffscreenRenderingContextId::Webgl2)
         return Empty {};
 #endif

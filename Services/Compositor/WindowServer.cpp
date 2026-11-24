@@ -8,7 +8,7 @@
 #include <Compositor/WindowServer.h>
 #include <stdlib.h>
 
-#if defined(AK_OS_MACOS) && !defined(LADYBIRD_CPU_ONLY)
+#if defined(AK_OS_MACOS) && !defined(LADYBIRD_WITHOUT_SKIA)
 #    include <Compositor/CoreAnimationWindowServer.h>
 #elif defined(AK_OS_WINDOWS) && defined(USE_DIRECTX)
 #    include <Compositor/DirectCompositionWindowServer.h>
@@ -18,7 +18,7 @@ namespace Compositor {
 
 RefPtr<WindowServer> WindowServer::try_create_for_presentation()
 {
-#if defined(AK_OS_MACOS) && !defined(LADYBIRD_CPU_ONLY)
+#if defined(AK_OS_MACOS) && !defined(LADYBIRD_WITHOUT_SKIA)
     return CoreAnimationWindowServer::try_create();
 #elif defined(AK_OS_WINDOWS) && defined(USE_DIRECTX)
     return DirectCompositionWindowServer::try_create();
@@ -31,14 +31,14 @@ ErrorOr<RefPtr<PresentableSurface>> WindowServer::try_create_presentable_surface
 {
     // NB: A surface larger than the GPU's largest texture can't be a sublayer of its own, so it's drawn into the frame
     //     from memory instead.
-#ifndef LADYBIRD_CPU_ONLY
+#ifndef LADYBIRD_WITHOUT_SKIA
     if (!skia_backend_context.can_hold_texture_of_size(size))
         return nullptr;
 #else
     (void)size;
     (void)skia_backend_context;
 #endif
-#if defined(AK_OS_MACOS) && !defined(LADYBIRD_CPU_ONLY)
+#if defined(AK_OS_MACOS) && !defined(LADYBIRD_WITHOUT_SKIA)
     return RefPtr<PresentableSurface> { TRY(CoreAnimationWindowServer::try_create_presentable_surface_over_new_iosurface(size, skia_backend_context)) };
 #elif defined(AK_OS_WINDOWS) && defined(USE_DIRECTX)
     return RefPtr<PresentableSurface> { TRY(DirectCompositionWindowServer::try_create_presentable_surface_on_gpu(size, skia_backend_context)) };
@@ -55,7 +55,7 @@ bool WindowServer::showing_tiles_of_painted_layers_is_switched_off()
 
 WindowServer::FrameHandOff WindowServer::frame_hand_off_through_presentation()
 {
-#if defined(AK_OS_MACOS) && !defined(LADYBIRD_CPU_ONLY)
+#if defined(AK_OS_MACOS) && !defined(LADYBIRD_WITHOUT_SKIA)
     return FrameHandOff::OnceGpuWorkIsScheduled;
 #else
     return FrameHandOff::OnceGpuWorkIsFinished;

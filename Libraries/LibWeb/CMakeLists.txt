@@ -1085,5 +1085,5 @@ generate_js_bindings(LibWeb)
 add_dependencies(libweb_bindings_rust-build generate_bindings)
 
 if (NOT ENABLE_SKIA)
-    set_property(SOURCE HTML/HTMLCanvasElement.cpp HTML/OffscreenCanvas.cpp APPEND PROPERTY COMPILE_DEFINITIONS LADYBIRD_CPU_ONLY=1)
+    set_property(SOURCE HTML/HTMLCanvasElement.cpp HTML/OffscreenCanvas.cpp APPEND PROPERTY COMPILE_DEFINITIONS LADYBIRD_WITHOUT_SKIA=1)
 endif()

@@ -415,7 +415,7 @@ JS::ThrowCompletionOr<HTMLCanvasElement::RenderingContext> HTMLCanvasElement::ge
 
     TRY(throw_if_control_transferred_to_offscreen());
 
-#ifdef LADYBIRD_CPU_ONLY
+#ifdef LADYBIRD_WITHOUT_SKIA
     if (type.is_one_of(u"2d"sv, u"webgl"sv, u"webgl2"sv, u"experimental-webgl"sv))
         return Empty {};
 #endif

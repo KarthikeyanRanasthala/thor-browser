@@ -44,7 +44,7 @@ def vcpkg_type(preset: str) -> str:
     presets_path = LADYBIRD_SOURCE_DIR / "Meta" / "CMake" / "presets" / "CMakeBasePresets.json"
     with open(presets_path, "r") as presets_file:
         presets = json.load(presets_file)["configurePresets"]
-    if preset == "ThorVG":
+    if preset in ("ThorVG", "ThorVGGL"):
         preset = "Release"
     for entry in presets:
         if entry["name"] == f"{preset}_base":
@@ -179,7 +179,7 @@ def manifest_feature_arguments(build_dir: Path, preset: str) -> list[str]:
     cache_path = build_dir / "CMakeCache.txt"
     cache = cache_path.read_text() if cache_path.exists() else ""
 
-    disabled_by_preset = {"ENABLE_SKIA", "LADYBIRD_ENABLE_SPARKLE"} if preset == "ThorVG" else set()
+    disabled_by_preset = {"ENABLE_SKIA", "LADYBIRD_ENABLE_SPARKLE"} if preset in ("ThorVG", "ThorVGGL") else set()
     return [
         f"--x-feature={feature}"
         for feature, options in MANIFEST_FEATURE_OPTIONS.items()

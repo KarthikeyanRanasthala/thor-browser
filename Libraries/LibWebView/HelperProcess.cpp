@@ -544,6 +544,8 @@ ErrorOr<NonnullRefPtr<WebView::CompositorClient>> launch_compositor_process(Byte
     Vector<ByteString> arguments;
     if (browser_options.use_thorvg)
         arguments.append("--thorvg"sv);
+    if (browser_options.use_thorvg_gl)
+        arguments.append("--thorvg-gl"sv);
 
     if (web_content_options.cache_path.has_value()) {
         arguments.append("--cache-path"sv);

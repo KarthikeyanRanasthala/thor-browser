@@ -54,7 +54,7 @@ class VideoFrameHolds;
 class CanvasHost {
 public:
     static Gfx::ShareableBitmap read_back_surface(Gfx::PaintingSurface&, Gfx::IntRect, Gfx::AlphaType = Gfx::AlphaType::Premultiplied, Gfx::ColorSpace const& = {});
-#ifdef LADYBIRD_CPU_ONLY
+#ifdef LADYBIRD_WITHOUT_SKIA
     CanvasHost(RefPtr<Gfx::SkiaBackendContext>, CanvasSurfaceRegistry& registry, VideoFrameHolds const&)
         : m_canvas_surface_owner_id(registry.allocate_owner_id())
     {
