@@ -9,7 +9,9 @@
 #    include <Compositor/DisplayListPlayerThorVG.h>
 #endif
 #include <Compositor/ConnectionFromClient.h>
+#ifndef LADYBIRD_CPU_ONLY
 #include <Compositor/FontSkia.h>
+#endif
 #include <Compositor/MainDispatchQueue.h>
 #include <Compositor/Sandbox.h>
 #include <Compositor/SkiaBackendContext.h>
@@ -72,7 +74,7 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         return Error::from_string_literal("--resource-root is required");
 
     PlatformFeatures::ProcessFeatures::initialize_for_current_process(TRY(PlatformFeatures::ProcessFeatures::from_string(PlatformFeatures::FeatureProcess::Compositor, platform_features)));
-    auto const& features = PlatformFeatures::ProcessFeatures::the();
+    [[maybe_unused]] auto const& features = PlatformFeatures::ProcessFeatures::the();
 
     Optional<Gfx::GpuDeviceIdentity> preferred_gpu_device;
     if (!gpu_device.is_empty()) {
@@ -105,12 +107,16 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
     if (auto result = Core::Platform::set_current_thread_qos(Core::Platform::ThreadQoS::UserInteractive); result.is_error())
         warnln("Could not set main thread QoS: {}", result.error());
 
+#ifndef LADYBIRD_CPU_ONLY
     if (enable_test_mode)
         Compositor::use_test_font_rendering();
+#endif
 
     Core::ResourceImplementation::install(make<Core::ResourceImplementationFile>(TRY(String::from_utf8(resource_root))));
+#ifndef LADYBIRD_CPU_ONLY
     if (force_fontconfig)
         Compositor::set_font_rasterizer(Compositor::FontRasterizer::FreeType);
+#endif
 
 #if defined(AK_OS_LINUX)
     // NB: The GPU driver starts threads, and Landlock does not confine a thread that already runs. Seccomp covers every
@@ -119,9 +125,13 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
         TRY(Compositor::restrict_filesystem(resource_root));
 #endif
 
+#ifndef LADYBIRD_CPU_ONLY
     if (features.is_enabled(PlatformFeatures::Feature::GpuPainting))
         Gfx::SkiaBackendContext::initialize_gpu_backend(preferred_gpu_device);
     auto skia_backend_context = Gfx::SkiaBackendContext::the_main_thread_context();
+#else
+    RefPtr<Gfx::SkiaBackendContext> skia_backend_context;
+#endif
 
     auto& event_loop = Core::EventLoop::initialize_for_current_thread();
 #ifdef AK_OS_MACOS
@@ -145,8 +155,12 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
 
     if (stats_log)
         stats_log->start_sampling([](JsonObject& values) {
+#ifndef LADYBIRD_CPU_ONLY
             if (auto context = Gfx::SkiaBackendContext::the_main_thread_context())
                 values.set("gpu.skia_resource_cache_bytes"sv, context->resource_cache_bytes());
+#else
+            (void)values;
+#endif
         });
 
     return event_loop.exec();

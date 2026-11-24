@@ -4,27 +4,30 @@
 
 #include <Compositor/DisplayListPlayerThorVG.h>
 #include <Compositor/PaintingSurface.h>
-#include <Compositor/SkiaUtils.h>
 #include <Compositor/ThorVGRaster.h>
 #include <LibCompositing/DisplayList/DisplayListCommand.h>
 #include <LibGfx/Bitmap.h>
+#include <LibGfx/CornerRadii.h>
 #include <LibGfx/DecodedImageFrame.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Gradients.h>
+#include <LibGfx/Matrix4x4.h>
 #include <LibGfx/PathData.h>
 #include <algorithm>
-#include <core/SkCanvas.h>
-#include <core/SkPathBuilder.h>
-#include <core/SkRRect.h>
 
 namespace Compositor {
 
 using namespace Compositing;
 namespace Replay = Compositing::RustFFI;
 
+#ifdef LADYBIRD_CPU_ONLY
+void DisplayListPlayerThorVG::set_enabled(bool) { }
+bool DisplayListPlayerThorVG::enabled() { return true; }
+#else
 static bool s_enabled;
 void DisplayListPlayerThorVG::set_enabled(bool enabled) { s_enabled = enabled; }
 bool DisplayListPlayerThorVG::enabled() { return s_enabled; }
+#endif
 
 static tvg::ColorSpace pixel_format(Gfx::BitmapFormat format, Gfx::AlphaType alpha)
 {
@@ -34,20 +37,70 @@ static tvg::ColorSpace pixel_format(Gfx::BitmapFormat format, Gfx::AlphaType alp
     return bgra ? tvg::ColorSpace::ARGB8888 : tvg::ColorSpace::ABGR8888;
 }
 
-static tvg::Matrix tvg_matrix(SkMatrix const& m)
+static tvg::Matrix tvg_matrix(Gfx::FloatMatrix4x4 const& m)
 {
-    return { m.getScaleX(), m.getSkewX(), m.getTranslateX(), m.getSkewY(), m.getScaleY(), m.getTranslateY(), 0, 0, 1 };
+    return { m[0, 0], m[0, 1], m[0, 3], m[1, 0], m[1, 1], m[1, 3], 0, 0, 1 };
 }
 
-static SkPath rounded_rect(SkRect r, Gfx::CornerRadii const& corners)
+static Gfx::FloatMatrix4x4 translate(float x, float y) { return Gfx::translation_matrix<float>({ x, y, 0 }); }
+static Gfx::FloatMatrix4x4 scale_by(float x, float y) { return Gfx::scale_matrix<float>({ x, y, 1 }); }
+static Gfx::FloatMatrix4x4 rotate_about(float degrees, float x, float y)
 {
-    if (!corners.has_any_radius())
-        return SkPath::Rect(r);
-    auto radius = [](auto v) -> SkVector { return { static_cast<float>(v.horizontal_radius), static_cast<float>(v.vertical_radius) }; };
-    SkVector radii[] = { radius(corners.top_left), radius(corners.top_right), radius(corners.bottom_right), radius(corners.bottom_left) };
-    SkRRect rr;
-    rr.setRectRadii(r, radii);
-    return SkPath::RRect(rr);
+    return translate(x, y) * Gfx::rotation_matrix<float>({ 0, 0, 1 }, AK::to_radians(degrees)) * translate(-x, -y);
+}
+static Gfx::FloatMatrix4x4 map_rect(Gfx::FloatRect src, Gfx::FloatRect dst)
+{
+    return translate(dst.x(), dst.y()) * scale_by(dst.width() / src.width(), dst.height() / src.height()) * translate(-src.x(), -src.y());
+}
+static bool can_transform(Gfx::FloatMatrix4x4 const& m)
+{
+    for (size_t row = 0; row < 4; ++row)
+        for (size_t column = 0; column < 4; ++column)
+            if (!isfinite(m[row, column]))
+                return false;
+    return m[3, 0] == 0 && m[3, 1] == 0 && m[3, 3] == 1;
+}
+static void append_rounded_rect(tvg::Shape& shape, Gfx::FloatRect r, Gfx::CornerRadii corners)
+{
+    if (r.is_empty())
+        return;
+    if (!corners.has_any_radius()) {
+        shape.appendRect(r.x(), r.y(), r.width(), r.height(), 0, 0);
+        return;
+    }
+    auto tl = corners.top_left, tr = corners.top_right, br = corners.bottom_right, bl = corners.bottom_left;
+    auto factor = 1.f;
+    auto fit = [&](int a, int b, float extent) {
+        if (static_cast<float>(a) + b > extent)
+            factor = min(factor, extent / (static_cast<float>(a) + b));
+    };
+    fit(tl.horizontal_radius, tr.horizontal_radius, r.width());
+    fit(bl.horizontal_radius, br.horizontal_radius, r.width());
+    fit(tl.vertical_radius, bl.vertical_radius, r.height());
+    fit(tr.vertical_radius, br.vertical_radius, r.height());
+    constexpr float k = .55228475f;
+    auto corner = [&](float x, float y, float ax, float ay, float bx, float by) {
+        shape.lineTo(x + ax, y + ay);
+        shape.cubicTo(x + ax * (1 - k), y + ay * (1 - k), x + bx * (1 - k), y + by * (1 - k), x + bx, y + by);
+    };
+    shape.moveTo(r.left() + factor * tl.horizontal_radius, r.top());
+    corner(r.right(), r.top(), -factor * tr.horizontal_radius, 0, 0, factor * tr.vertical_radius);
+    corner(r.right(), r.bottom(), 0, -factor * br.vertical_radius, -factor * br.horizontal_radius, 0);
+    corner(r.left(), r.bottom(), factor * bl.horizontal_radius, 0, 0, -factor * bl.vertical_radius);
+    corner(r.left(), r.top(), 0, factor * tl.vertical_radius, factor * tl.horizontal_radius, 0);
+    shape.close();
+}
+static tvg::Shape* rounded_rect(Gfx::FloatRect rect, Gfx::CornerRadii corners = {})
+{
+    auto* shape = tvg::Shape::gen();
+    append_rounded_rect(*shape, rect, corners);
+    return shape;
+}
+static tvg::Shape* decoded_shape(ReadonlyBytes bytes, Gfx::WindingRule rule)
+{
+    tvg::Shape* shape = nullptr;
+    Gfx::with_contours_of_serialized_path(bytes, [&](auto const& path) { shape = thorvg_shape(path, rule); });
+    return shape;
 }
 
 static tvg::BlendMethod blend_method(Gfx::CompositingAndBlendingOperator op)
@@ -97,7 +150,7 @@ struct DisplayListPlayerThorVG::Impl {
     AK_ALLOC_WITH_KMALLOC;
     struct State {
         tvg::Scene* scene {};
-        SkM44 matrix;
+        Gfx::FloatMatrix4x4 matrix;
         bool hidden {};
     };
     Vector<State> stack;
@@ -111,7 +164,7 @@ struct DisplayListPlayerThorVG::Impl {
     // by frame identity, releasing the decoder storage as soon as conversion is complete.
     std::unique_ptr<tvg::Picture, decltype(&tvg::Paint::rel)> video_picture { nullptr, &tvg::Paint::rel };
     u64 video_frame_id {};
-    SkRect video_source_rect {};
+    Gfx::FloatRect video_source_rect {};
     unsigned glyphs_painted {};
     HashTable<unsigned> reported_skips;
     bool reported_text {};
@@ -124,9 +177,9 @@ struct DisplayListPlayerThorVG::Impl {
         surface.notify_content_will_change();
         canvas.reset(tvg::SwCanvas::gen());
         VERIFY(canvas && canvas->target(bitmap->begin(), bitmap->pitch() / 4, bitmap->width(), bitmap->height(), pixel_format(bitmap->format(), bitmap->alpha_type())) == tvg::Result::Success);
-        state = { tvg::Scene::gen(), surface.canvas().getLocalToDevice(), false };
-        auto clip = surface.canvas().getDeviceClipBounds();
-        if (clip.isEmpty())
+        state = { tvg::Scene::gen(), surface.paint_matrix(), false };
+        auto clip = surface.device_clip();
+        if (clip.is_empty())
             state.hidden = true;
         else
             VERIFY(canvas->viewport(clip.x(), clip.y(), clip.width(), clip.height()) == tvg::Result::Success);
@@ -164,25 +217,32 @@ struct DisplayListPlayerThorVG::Impl {
         VERIFY(state.scene->add(scene) == tvg::Result::Success);
         state.scene = scene;
     }
-    void clip(SkPath const& path)
+    // Replay emits the content first, then the paints that determine its coverage.
+    // Keep those paints in a detached scene owned by the content's mask.
+    void begin_mask_content(Gfx::MaskKind kind)
     {
+        scope();
         if (state.hidden)
             return;
-        auto* shape = tvg::Shape::gen();
-        auto m = state.matrix.asM33();
-        if (m.hasPerspective() || !append_thorvg_path(*shape, path)) {
-            tvg::Paint::rel(shape);
+        auto* mask = tvg::Scene::gen();
+        VERIFY(state.scene->mask(mask, kind == Gfx::MaskKind::Luminance ? tvg::MaskMethod::Luma : tvg::MaskMethod::Alpha) == tvg::Result::Success);
+        state.scene = mask;
+    }
+    void clip(tvg::Shape* shape)
+    {
+        if (!shape || state.hidden || !can_transform(state.matrix)) {
+            if (shape)
+                tvg::Paint::rel(shape);
             state.hidden = true;
             return;
         }
-        shape->transform(tvg_matrix(m));
-        shape->fillRule(path.getFillType() == SkPathFillType::kEvenOdd ? tvg::FillRule::EvenOdd : tvg::FillRule::NonZero);
+        shape->transform(tvg_matrix(state.matrix));
         VERIFY(state.scene->clip(shape) == tvg::Result::Success);
     }
 
-    bool add(tvg::Paint* paint, SkMatrix const& m)
+    bool add(tvg::Paint* paint, Gfx::FloatMatrix4x4 const& m)
     {
-        if (state.hidden || m.hasPerspective() || !m.isFinite() || paint->transform(tvg_matrix(m)) != tvg::Result::Success || state.scene->add(paint) != tvg::Result::Success) {
+        if (state.hidden || !can_transform(m) || paint->transform(tvg_matrix(m)) != tvg::Result::Success || state.scene->add(paint) != tvg::Result::Success) {
             tvg::Paint::rel(paint);
             return false;
         }
@@ -190,15 +250,10 @@ struct DisplayListPlayerThorVG::Impl {
         return true;
     }
 
-    bool path(SkPath const& path, Gfx::Color color, SkMatrix const& matrix, float stroke = 0, tvg::StrokeCap cap = tvg::StrokeCap::Butt, tvg::StrokeJoin join = tvg::StrokeJoin::Miter, float miter = 4, tvg::BlendMethod blend = tvg::BlendMethod::Normal)
+    bool path(tvg::Shape* shape, Gfx::Color color, Gfx::FloatMatrix4x4 const& matrix, float stroke = 0, tvg::StrokeCap cap = tvg::StrokeCap::Butt, tvg::StrokeJoin join = tvg::StrokeJoin::Miter, float miter = 4, tvg::BlendMethod blend = tvg::BlendMethod::Normal)
     {
-        if (state.hidden || path.isEmpty())
+        if (!shape)
             return false;
-        auto* shape = tvg::Shape::gen();
-        if (!append_thorvg_path(*shape, path)) {
-            tvg::Paint::rel(shape);
-            return false;
-        }
         shape->blend(blend);
         if (stroke > 0) {
             shape->fill(0, 0, 0, 0);
@@ -209,7 +264,6 @@ struct DisplayListPlayerThorVG::Impl {
             shape->strokeMiterlimit(miter);
         } else {
             shape->fill(color.red(), color.green(), color.blue(), color.alpha());
-            shape->fillRule(path.getFillType() == SkPathFillType::kEvenOdd ? tvg::FillRule::EvenOdd : tvg::FillRule::NonZero);
         }
         if (!add(shape, matrix))
             return false;
@@ -218,10 +272,10 @@ struct DisplayListPlayerThorVG::Impl {
 
     void rect(auto const& r, Gfx::Color color, tvg::BlendMethod blend = tvg::BlendMethod::Normal)
     {
-        path(SkPath::Rect(Gfx::to_skia_rect(r)), color, state.matrix.asM33(), 0, tvg::StrokeCap::Butt, tvg::StrokeJoin::Miter, 4, blend);
+        path(rounded_rect(Gfx::FloatRect(r)), color, state.matrix, 0, tvg::StrokeCap::Butt, tvg::StrokeJoin::Miter, 4, blend);
     }
 
-    static tvg::Picture* copy_picture(u32 const* data, size_t pitch, SkIRect area, tvg::ColorSpace format)
+    static tvg::Picture* copy_picture(u32 const* data, size_t pitch, Gfx::IntRect area, tvg::ColorSpace format)
     {
         auto* copy = static_cast<u32*>(calloc(static_cast<size_t>(area.width()) * area.height(), sizeof(u32)));
         if (!copy)
@@ -237,23 +291,23 @@ struct DisplayListPlayerThorVG::Impl {
         return image;
     }
 
-    void draw_picture(tvg::Paint* image, SkRect src, SkRect dst)
+    void draw_picture(tvg::Paint* image, Gfx::FloatRect src, Gfx::FloatRect dst)
     {
         group();
-        clip(SkPath::Rect(dst));
-        auto m = state.matrix.asM33();
-        m.preConcat(SkMatrix::RectToRect(src, dst));
+        clip(rounded_rect(dst));
+        auto m = state.matrix;
+        m = m * map_rect(src, dst);
         add(image, m);
         pop();
     }
 
-    void pixels(u32 const* data, size_t pitch, int w, int h, tvg::ColorSpace format, SkRect src, SkRect dst)
+    void pixels(u32 const* data, size_t pitch, int w, int h, tvg::ColorSpace format, Gfx::FloatRect src, Gfx::FloatRect dst)
     {
-        if (state.hidden || src.isEmpty() || dst.isEmpty() || !data || !SkRect::MakeIWH(w, h).contains(src))
+        if (state.hidden || src.is_empty() || dst.is_empty() || !data || !Gfx::FloatRect(0, 0, w, h).contains(src))
             return;
-        auto area = src.roundOut();
+        auto area = Gfx::enclosing_int_rect(src);
         if (auto* image = copy_picture(data, pitch, area, format)) {
-            src.offset(-area.x(), -area.y());
+            src.translate_by(-area.x(), -area.y());
             draw_picture(image, src, dst);
         }
     }
@@ -270,20 +324,20 @@ struct DisplayListPlayerThorVG::Impl {
             if (pixels.is_error())
                 return;
             auto const& bitmap = *pixels.value();
-            auto area = SkIRect::MakeWH(min(frame->width(), static_cast<u32>(bitmap.width())), min(frame->height(), static_cast<u32>(bitmap.height())));
-            if (area.isEmpty())
+            auto area = Gfx::IntRect(0, 0, min(frame->width(), static_cast<u32>(bitmap.width())), min(frame->height(), static_cast<u32>(bitmap.height())));
+            if (area.is_empty())
                 return;
             video_picture.reset(copy_picture(bitmap.begin(), bitmap.pitch() / 4, area, pixel_format(bitmap.format(), bitmap.alpha_type())));
             if (!video_picture)
                 return;
-            video_source_rect = SkRect::Make(area);
+            video_source_rect = Gfx::FloatRect(area);
             video_frame_id = frame->id();
         }
         video_picture->filter(command.scaling_mode == Gfx::ScalingMode::NearestNeighbor ? tvg::FilterMethod::Nearest : tvg::FilterMethod::Bilinear);
-        draw_picture(video_picture->duplicate(), video_source_rect, Gfx::to_skia_rect(command.dst_rect));
+        draw_picture(video_picture->duplicate(), video_source_rect, Gfx::FloatRect(command.dst_rect));
     }
 
-    void surface(Gfx::PaintingSurface const& surface, SkRect src, SkRect dst)
+    void surface(Gfx::PaintingSurface const& surface, Gfx::FloatRect src, Gfx::FloatRect dst)
     {
         if (auto* bmp = surface.backing_bitmap())
             pixels(bmp->begin(), bmp->pitch() / 4, bmp->width(), bmp->height(), pixel_format(bmp->format(), bmp->alpha_type()), src, dst);
@@ -299,7 +353,7 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
         return;
     auto read = [&]<typename T>() { return read_display_list_object<T>({ bytes, sizeof(T) }); };
     auto data = [&](DisplayListDataSpan span) { return payload.slice(span.offset, span.size); };
-    auto m = state.matrix.asM33();
+    auto m = state.matrix;
     auto gradient = [&](std::unique_ptr<tvg::Fill> fill, DisplayListGradientColorStops const& stops, Gfx::IntRect rect, Gfx::CompositingAndBlendingOperator op) {
         auto colors = data(stops.colors);
         auto positions = data(stops.positions);
@@ -324,14 +378,13 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
     switch (type) {
     case DisplayListCommandType::PaintLinearGradient: {
         auto c = read.operator()<PaintLinearGradient>();
-        auto rect = c.gradient_rect.to_type<float>();
+        auto rect = Gfx::FloatRect(c.gradient_rect);
         auto length = Gfx::calculate_gradient_length(rect.size(), c.gradient_angle);
         auto center = rect.center();
         auto y = center.y() + (.5f - c.first_stop_position) * length;
         auto fill = std::unique_ptr<tvg::LinearGradient>(tvg::LinearGradient::gen());
         fill->linear(center.x(), y, center.x(), y - length * c.repeat_length);
-        SkMatrix rotation;
-        rotation.setRotate(c.gradient_angle, center.x(), center.y());
+        auto rotation = rotate_about(c.gradient_angle, center.x(), center.y());
         fill->transform(tvg_matrix(rotation));
         gradient(std::move(fill), c.color_stops, c.gradient_rect, c.compositing_and_blending_operator);
         return;
@@ -343,8 +396,7 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
         auto center = c.center.translated(c.rect.location());
         auto fill = std::unique_ptr<tvg::RadialGradient>(tvg::RadialGradient::gen());
         fill->radial(center.x(), center.y(), c.size.height(), center.x(), center.y(), 0);
-        SkMatrix scale;
-        scale.setScale(static_cast<float>(c.size.width()) / c.size.height(), 1.f, center.x(), center.y());
+        auto scale = translate(center.x(), center.y()) * scale_by(static_cast<float>(c.size.width()) / c.size.height(), 1.f) * translate(-center.x(), -center.y());
         fill->transform(tvg_matrix(scale));
         gradient(std::move(fill), c.color_stops, c.rect, c.compositing_and_blending_operator);
         return;
@@ -356,10 +408,10 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
             return;
         if (run.orientation != Gfx::GlyphRunOrientation::Horizontal) {
             bool ccw = run.orientation == Gfx::GlyphRunOrientation::VerticalCounterclockwise;
-            m.preTranslate(ccw ? 0 : run.rect.width(), ccw ? run.rect.height() : 0);
-            m.preRotate(ccw ? -90 : 90, run.rect.x(), run.rect.y());
+            m = m * translate(ccw ? 0 : run.rect.width(), ccw ? run.rect.height() : 0);
+            m = m * rotate_about(ccw ? -90 : 90, run.rect.x(), run.rect.y());
         }
-        m.preTranslate(run.translation.x(), run.translation.y());
+        m = m * translate(run.translation.x(), run.translation.y());
         auto bytes = data(run.glyphs);
         ReadonlySpan<DisplayListGlyph> glyphs { reinterpret_cast<DisplayListGlyph const*>(bytes.data()), bytes.size() / sizeof(DisplayListGlyph) };
         Vector<u32, 32> glyph_ids;
@@ -370,9 +422,9 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
             if (outline.verbs.is_empty())
                 return;
             auto position = m;
-            position.preScale(run.scale, run.scale);
-            position.preTranslate(glyphs[i].position.x(), glyphs[i].position.y() + ascent);
-            if (path(Gfx::to_skia_path(outline), run.color, position, run.stroke_width / run.scale))
+            position = position * scale_by(run.scale, run.scale);
+            position = position * translate(glyphs[i].position.x(), glyphs[i].position.y() + ascent);
+            if (path(thorvg_shape(outline, outline.winding_rule), run.color, position, run.stroke_width / run.scale))
                 ++glyphs_painted;
         });
         return;
@@ -381,8 +433,7 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
         auto fill = read.operator()<FillPath>();
         if (fill.paint_kind != PathPaintKind::Color)
             break;
-        auto outline = Gfx::skia_path_from_serialized_bytes(data(fill.path_data));
-        outline.setFillType(Gfx::to_skia_path_fill_type(fill.winding_rule));
+        auto* outline = decoded_shape(data(fill.path_data), fill.winding_rule);
         path(outline, fill.color, m, 0, tvg::StrokeCap::Butt, tvg::StrokeJoin::Miter, 4, blend_method(fill.compositing_and_blending_operator));
         return;
     }
@@ -390,10 +441,10 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
         auto stroke = read.operator()<StrokePath>();
         if (stroke.paint_kind != PathPaintKind::Color || stroke.dash_array.size || stroke.thickness <= 0)
             break;
-        auto outline = Gfx::skia_path_from_serialized_bytes(data(stroke.path_data));
+        auto* outline = decoded_shape(data(stroke.path_data), Gfx::WindingRule::Nonzero);
         constexpr tvg::StrokeCap caps[] = { tvg::StrokeCap::Butt, tvg::StrokeCap::Round, tvg::StrokeCap::Square };
         constexpr tvg::StrokeJoin joins[] = { tvg::StrokeJoin::Miter, tvg::StrokeJoin::Round, tvg::StrokeJoin::Bevel };
-        path(outline, stroke.color, m, stroke.thickness, caps[Gfx::to_skia_cap(stroke.cap_style)], joins[Gfx::to_skia_join(stroke.join_style)], stroke.miter_limit);
+        path(outline, stroke.color, m, stroke.thickness, caps[to_underlying(stroke.cap_style)], joins[to_underlying(stroke.join_style)], stroke.miter_limit);
         return;
     }
     case DisplayListCommandType::PaintCaret: {
@@ -403,25 +454,31 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
     }
     case DisplayListCommandType::DrawRect: {
         auto c = read.operator()<DrawRect>();
-        path(SkPath::Rect(Gfx::to_skia_rect(c.rect)), c.color, m, 1);
+        path(rounded_rect(Gfx::FloatRect(c.rect)), c.color, m, 1);
         return;
     }
     case DisplayListCommandType::DrawEllipse: {
         auto c = read.operator()<DrawEllipse>();
-        path(SkPath::Oval(Gfx::to_skia_rect(c.rect)), c.color, m, c.thickness);
+        auto* ellipse = tvg::Shape::gen();
+        auto rect = Gfx::FloatRect(c.rect);
+        ellipse->appendCircle(rect.center().x(), rect.center().y(), rect.width() / 2, rect.height() / 2);
+        path(ellipse, c.color, m, c.thickness);
         return;
     }
     case DisplayListCommandType::DrawLine: {
         auto c = read.operator()<DrawLine>();
         if (c.style != Gfx::LineStyle::Solid)
             break;
-        path(SkPath::Line(Gfx::to_skia_point(c.from), Gfx::to_skia_point(c.to)), c.color, m, c.thickness);
+        auto* line = tvg::Shape::gen();
+        line->moveTo(c.from.x(), c.from.y());
+        line->lineTo(c.to.x(), c.to.y());
+        path(line, c.color, m, c.thickness);
         return;
     }
     case DisplayListCommandType::FillRoundedRectRing: {
         auto c = read.operator()<FillRoundedRectRing>();
-        auto outer = Gfx::to_skia_rect(c.rect);
-        auto inner = SkRect::MakeLTRB(outer.left() + c.left_width, outer.top() + c.top_width, outer.right() - c.right_width, outer.bottom() - c.bottom_width);
+        auto outer = Gfx::FloatRect(c.rect);
+        auto inner = Gfx::FloatRect(outer.x() + c.left_width, outer.y() + c.top_width, outer.width() - c.left_width - c.right_width, outer.height() - c.top_width - c.bottom_width);
         auto corners = c.corner_radii;
         auto inset = [](auto& r, int x, int y) {
             r.horizontal_radius = max(0, r.horizontal_radius - x);
@@ -431,11 +488,10 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
         inset(corners.top_right, c.right_width, c.top_width);
         inset(corners.bottom_left, c.left_width, c.bottom_width);
         inset(corners.bottom_right, c.right_width, c.bottom_width);
-        SkPathBuilder ring(SkPathFillType::kEvenOdd);
-        ring.addPath(rounded_rect(outer, c.corner_radii));
-        if (!inner.isEmpty())
-            ring.addPath(rounded_rect(inner, corners));
-        path(ring.detach(), c.color, m);
+        auto* ring = rounded_rect(outer, c.corner_radii);
+        append_rounded_rect(*ring, inner, corners);
+        ring->fillRule(tvg::FillRule::EvenOdd);
+        path(ring, c.color, m);
         return;
     }
     case DisplayListCommandType::DrawVideoFrame:
@@ -447,7 +503,7 @@ void DisplayListPlayerThorVG::Impl::command(DisplayListCommandType type, u8 cons
         auto c = read.operator()<DrawScaledDecodedImageFrame>();
         auto const& frame = images->image_frame(c.frame_id).frame();
         pixels(reinterpret_cast<u32 const*>(frame.pixels().data()), frame.pitch() / 4, frame.width(), frame.height(),
-            pixel_format(frame.format(), frame.alpha_type()), c.src_rect.has_value() ? Gfx::to_skia_rect(c.src_rect.value()) : SkRect::MakeIWH(frame.width(), frame.height()), Gfx::to_skia_rect(c.dst_rect));
+            pixel_format(frame.format(), frame.alpha_type()), c.src_rect.has_value() ? Gfx::FloatRect(c.src_rect.value()) : Gfx::FloatRect(0, 0, frame.width(), frame.height()), Gfx::FloatRect(c.dst_rect));
         return;
     }
     default:
@@ -461,71 +517,66 @@ Replay::FfiRasterPainter DisplayListPlayerThorVG::Impl::callbacks()
     return {
         .context = this,
         .canvas_matrix = [](void* c) {
-            Gfx::FloatMatrix4x4 m;
-            for (int i = 0; i < 4; ++i)
-                for (int j = 0; j < 4; ++j)
-                    m[i, j] = static_cast<Impl*>(c)->state.matrix.rc(i, j);
-            return m; },
-        .set_matrix = [](void* c, Gfx::FloatMatrix4x4 const* m) {
-            auto& matrix = static_cast<Impl*>(c)->state.matrix;
-            for (int i = 0; i < 4; ++i)
-                for (int j = 0; j < 4; ++j)
-                    matrix.setRC(i, j, (*m)[i, j]); },
+            return static_cast<Impl*>(c)->state.matrix; },
+        .set_matrix = [](void* c, Gfx::FloatMatrix4x4 const* m) { static_cast<Impl*>(c)->state.matrix = *m; },
         .would_be_fully_clipped_by_painter = [](void* c, Gfx::IntRect) { return static_cast<Impl*>(c)->state.hidden; },
         .push_clip = [](void* c, ReplayClip const* clip) {
             auto& p = *static_cast<Impl*>(c);
             p.group();
             if (clip->mode == ClipMode::Intersect)
-                p.clip(rounded_rect(Gfx::to_skia_rect(clip->rect), clip->corner_radii));
+                p.clip(rounded_rect(Gfx::FloatRect(clip->rect), clip->corner_radii));
             else
                 p.state.hidden = true; },
         .push_clip_path = [](void* c, Gfx::FFI::PathGeometryData const* geometry, u64, Gfx::WindingRule rule) {
             auto& p = *static_cast<Impl*>(c);
             p.group();
-            auto path = Gfx::to_skia_path(Gfx::PathData::from_ffi(*geometry));
-            path.setFillType(Gfx::to_skia_path_fill_type(rule));
-            p.clip(path); },
+            p.clip(thorvg_shape(Gfx::PathData::from_ffi(*geometry), rule)); },
         .push_layer = [](void* c, ReplayLayer const* layer) { static_cast<Impl*>(c)->group(layer->opacity, blend_method(layer->blend_mode)); },
-        .push_mask = [](void* c, ReplayMask const*, ReplayLayer const*) { static_cast<Impl*>(c)->scope(true); },
-        .begin_mask_content = [](void*, ReplayMask const*) { },
-        .pop_mask = [](void* c) { static_cast<Impl*>(c)->pop(); },
+        .push_mask = [](void* c, ReplayMask const* mask, ReplayLayer const* backdrop) {
+            auto& p = *static_cast<Impl*>(c);
+            if (backdrop && backdrop->backdrop_filter_bytes_size)
+                p.group(backdrop->opacity, blend_method(backdrop->blend_mode));
+            else
+                p.group();
+            p.clip(rounded_rect(Gfx::FloatRect(mask->rect))); },
+        .begin_mask_content = [](void* c, ReplayMask const* mask) { static_cast<Impl*>(c)->begin_mask_content(mask->kind); },
+        .pop_mask = [](void* c) {
+            auto& p = *static_cast<Impl*>(c);
+            p.pop();
+            p.pop(); },
         .pop = [](void* c) { static_cast<Impl*>(c)->pop(); },
         .push_device_space_plane_clip = [](void* c, Gfx::FloatVector3 const*, size_t) { static_cast<Impl*>(c)->scope(true); },
         .push_transform = [](void* c, Gfx::AffineTransform const* t) {
             auto& p = *static_cast<Impl*>(c);
             p.scope();
-            p.state.matrix.preConcat(SkM44(Gfx::to_skia_matrix(*t))); },
+            p.state.matrix = p.state.matrix * t->to_matrix(); },
         .push_clip_path_bytes = [](void* c, u8 const* bytes, size_t n, Gfx::WindingRule rule, ClipMode mode) {
             auto& p = *static_cast<Impl*>(c);
             p.group();
             if (mode == ClipMode::Intersect) {
-                auto path = Gfx::skia_path_from_serialized_bytes({ bytes, n });
-                path.setFillType(Gfx::to_skia_path_fill_type(rule));
-                p.clip(path);
+                p.clip(decoded_shape({ bytes, n }, rule));
             } else
                 p.state.hidden = true; },
         .play_command = [](void* c, DisplayListCommandType type, u8 const* bytes, u8 const* payload, size_t n) { static_cast<Impl*>(c)->command(type, bytes, { payload, n }); },
         .fill_rect = [](void* c, Replay::ResolvedFillRect const* fill) { static_cast<Impl*>(c)->rect(fill->rect, fill->color, blend_method(fill->compositing_and_blending_operator)); },
         .fill_rect_with_rounded_corners = [](void* c, Replay::ResolvedFillRectWithRoundedCorners const* fill) {
             auto& p = *static_cast<Impl*>(c);
-            p.path(rounded_rect(Gfx::to_skia_rect(fill->rect), fill->corner_radii), fill->color, p.state.matrix.asM33()); },
+            p.path(rounded_rect(Gfx::FloatRect(fill->rect), fill->corner_radii), fill->color, p.state.matrix); },
         .paint_scrollbar = [](void* c, Replay::PresentedScrollbar const* bar) {
             auto& p = *static_cast<Impl*>(c);
             p.group(bar->opacity);
             p.rect(bar->gutter_rect, bar->track_color);
-            auto r = Gfx::to_skia_rect(bar->thumb_rect);
-            p.path(SkPath::RRect(r, r.width() / 2, r.width() / 2), bar->thumb_color, p.state.matrix.asM33());
+            auto r = Gfx::FloatRect(bar->thumb_rect);
+            auto* thumb = tvg::Shape::gen();
+            thumb->appendRect(r.x(), r.y(), r.width(), r.height(), r.width() / 2, r.width() / 2);
+            p.path(thumb, bar->thumb_color, p.state.matrix);
             p.pop(); },
-        .draw_composited_context = [](void* c, Replay::CompositedContextDraw const* d) { static_cast<Impl*>(c)->surface(*static_cast<Gfx::PaintingSurface*>(d->surface), Gfx::to_skia_rect(d->src_rect), Gfx::to_skia_rect(d->dst_rect)); },
+        .draw_composited_context = [](void* c, Replay::CompositedContextDraw const* d) { static_cast<Impl*>(c)->surface(*static_cast<Gfx::PaintingSurface*>(d->surface), Gfx::FloatRect(d->src_rect), Gfx::FloatRect(d->dst_rect)); },
         .begin_isolated_group = [](void* c, Replay::IsolatedGroup const* g) {
             auto& p = *static_cast<Impl*>(c);
             p.group(g->opacity, blend_method(g->compositing_and_blending_operator));
-            p.clip(SkPath::Rect(Gfx::to_skia_rect(g->clip_rect))); },
-        .begin_isolated_group_mask = [](void* c, Gfx::MaskKind) {
-            auto& p = *static_cast<Impl*>(c);
-            if (!p.state.hidden)
-                p.state.scene->opacity(0);
-            p.scope(true); },
+            p.clip(rounded_rect(Gfx::FloatRect(g->clip_rect))); },
+        .begin_isolated_group_mask = [](void* c, Gfx::MaskKind kind) { static_cast<Impl*>(c)->begin_mask_content(kind); },
         .end_isolated_group_mask = [](void* c) { static_cast<Impl*>(c)->pop(); },
         .end_isolated_group = [](void* c) { static_cast<Impl*>(c)->pop(); },
         .begin_tile_raster = [](void*, Replay::TileRaster const*) { return false; },
@@ -535,11 +586,11 @@ Replay::FfiRasterPainter DisplayListPlayerThorVG::Impl::callbacks()
             if (p.state.hidden || v->rect.is_empty() || v->recorded_size.is_empty())
                 return Replay::VectorImageReplay::Skipped;
             p.group();
-            p.clip(SkPath::Rect(Gfx::to_skia_rect(v->rect)));
-            p.state.matrix.preConcat(SkM44(SkMatrix::RectToRect(SkRect::MakeIWH(v->recorded_size.width(), v->recorded_size.height()), Gfx::to_skia_rect(v->rect))));
+            p.clip(rounded_rect(Gfx::FloatRect(v->rect)));
+            p.state.matrix = p.state.matrix * map_rect(Gfx::FloatRect(0, 0, v->recorded_size.width(), v->recorded_size.height()), Gfx::FloatRect(v->rect));
             return Replay::VectorImageReplay::Directly; },
         .end_vector_image = [](void* c) { static_cast<Impl*>(c)->pop(); },
-        .draw_surface = [](void* c, Replay::SurfaceDraw const* d) { static_cast<Impl*>(c)->surface(*static_cast<Gfx::PaintingSurface*>(d->surface), Gfx::to_skia_rect(d->source_rect), Gfx::to_skia_rect(d->target_rect)); },
+        .draw_surface = [](void* c, Replay::SurfaceDraw const* d) { static_cast<Impl*>(c)->surface(*static_cast<Gfx::PaintingSurface*>(d->surface), Gfx::FloatRect(d->source_rect), Gfx::FloatRect(d->target_rect)); },
     };
 }
 
@@ -587,8 +638,9 @@ void DisplayListPlayerThorVG::end()
 void DisplayListPlayerThorVG::clear(Gfx::PaintingSurface& surface, Gfx::Color color)
 {
     auto& bitmap = *surface.backing_bitmap();
-    auto area = surface.canvas().getDeviceClipBounds();
-    if (!area.intersect(SkIRect::MakeWH(bitmap.width(), bitmap.height())))
+    auto area = surface.device_clip();
+    area.intersect(bitmap.rect());
+    if (area.is_empty())
         return;
     surface.notify_content_will_change();
     color.set_alpha(color.alpha(), bitmap.alpha_type());
@@ -602,12 +654,12 @@ void DisplayListPlayerThorVG::blit(Gfx::PaintingSurface& target, Gfx::PaintingSu
 {
     Impl painter;
     painter.open(target);
-    painter.surface(source, Gfx::to_skia_rect(src), Gfx::to_skia_rect(dst));
+    painter.surface(source, Gfx::FloatRect(src), Gfx::FloatRect(dst));
     if (replace) {
-        auto& canvas = target.canvas();
-        SkAutoCanvasRestore save(&canvas, true);
-        canvas.clipRect(Gfx::to_skia_rect(dst));
+        auto count = target.save_state();
+        target.clip_rect(dst);
         clear(target, Gfx::Color::Transparent);
+        target.restore_state(count);
     }
     painter.finish();
 }

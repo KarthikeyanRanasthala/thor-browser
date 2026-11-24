@@ -327,6 +327,7 @@ def configure_build_env(platform: Platform, preset: str, jobs: Optional[str] = N
         "Distribution": build_root_dir / "distribution",
         "Fuzzers": build_root_dir / "fuzzers",
         "Release": build_root_dir / "release",
+        "ThorVG": build_root_dir / "thorvg",
         "Sanitizer": build_root_dir / "sanitizer",
         "ThreadSanitizer": build_root_dir / "tsan",
     }
@@ -337,6 +338,7 @@ def configure_build_env(platform: Platform, preset: str, jobs: Optional[str] = N
         "Distribution": main_build_root_dir / "vcpkg-distribution",
         "Fuzzers": main_build_root_dir / "vcpkg-distribution",
         "Release": main_build_root_dir / "vcpkg-release",
+        "ThorVG": main_build_root_dir / "vcpkg-release",
         "Sanitizer": main_build_root_dir / "vcpkg-sanitizer",
         "ThreadSanitizer": main_build_root_dir / "vcpkg-release",
     }

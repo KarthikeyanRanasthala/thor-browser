@@ -19,6 +19,7 @@
 #include <AK/String.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
+#include <Compositor/CanvasSurfaceRegistry.h>
 #include <Compositor/BitmapExport.h>
 #include <Compositor/DrawnResources.h>
 #include <Compositor/Forward.h>
@@ -52,6 +53,20 @@ class VideoFrameHolds;
 
 class CanvasHost {
 public:
+    static Gfx::ShareableBitmap read_back_surface(Gfx::PaintingSurface&, Gfx::IntRect, Gfx::AlphaType = Gfx::AlphaType::Premultiplied, Gfx::ColorSpace const& = {});
+#ifdef LADYBIRD_CPU_ONLY
+    CanvasHost(RefPtr<Gfx::SkiaBackendContext>, CanvasSurfaceRegistry& registry, VideoFrameHolds const&)
+        : m_canvas_surface_owner_id(registry.allocate_owner_id())
+    {
+    }
+    Compositing::CanvasSurfaceOwnerId canvas_surface_owner_id() const { return m_canvas_surface_owner_id; }
+    RefPtr<Gfx::PaintingSurface> presented_surface(Compositing::CanvasId) { return nullptr; }
+    bool describe_canvas_2d_fonts(Vector<Compositing::DisplayListFontDescription> const& fonts, Compositing::RegisteredTypefaces const&) { return fonts.is_empty(); }
+    void forget_video_sink(Media::VideoSinkHandle) { }
+
+private:
+    Compositing::CanvasSurfaceOwnerId m_canvas_surface_owner_id;
+#else
     struct HeldVideoFrame {
         Media::VideoSinkHandle sink_handle;
         u64 generation { 0 };
@@ -97,7 +112,6 @@ public:
 
     void forget_video_sink(Media::VideoSinkHandle);
 
-    static Gfx::ShareableBitmap read_back_surface(Gfx::PaintingSurface&, Gfx::IntRect, Gfx::AlphaType = Gfx::AlphaType::Premultiplied, Gfx::ColorSpace const& = {});
     static Optional<Gfx::IntSize> read_back_surface_into(Gfx::PaintingSurface&, Gfx::IntRect, Gfx::AlphaType, Gfx::ColorSpace const&, Bytes pixels);
 
 private:
@@ -125,6 +139,7 @@ private:
     struct VideoFrameImage;
     HashMap<Media::VideoSinkHandle, NonnullOwnPtr<VideoFrameImage>> m_video_frame_images;
     bool m_painting_sampled_video_frame_on_gpu { false };
+#endif
 };
 
 }

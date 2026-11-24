@@ -5,7 +5,7 @@
  */
 
 //! A surface the Compositor paints into, which the core and the C++ around it share by reference counting: a pointer to
-//! a `Gfx::PaintingSurface` is the `PaintingSurface` of an `Rc`. The Skia part of the surface is C++, and the surface
+//! a `Gfx::PaintingSurface` is the `PaintingSurface` of an `Rc`. The raster data of the surface is C++, and the surface
 //! owns it. Only the Compositor's main thread may retain, release or read a surface.
 
 use libgfx_rust::IntSize;
@@ -16,8 +16,8 @@ use std::rc::Rc;
 pub struct PaintingSurface {
     size: IntSize,
     gpu_backend_context: *const c_void,
-    skia_surface: NonNull<c_void>,
-    destroy_skia_surface: unsafe extern "C" fn(*mut c_void),
+    raster_data: NonNull<c_void>,
+    destroy_raster_data: unsafe extern "C" fn(*mut c_void),
 }
 
 impl PaintingSurface {
@@ -72,31 +72,31 @@ impl PaintingSurface {
 
 impl Drop for PaintingSurface {
     fn drop(&mut self) {
-        // SAFETY: The surface owns its Skia part, which nothing uses once the last reference is gone.
-        unsafe { (self.destroy_skia_surface)(self.skia_surface.as_ptr()) };
+        // SAFETY: The surface owns its raster data, which nothing uses once the last reference is gone.
+        unsafe { (self.destroy_raster_data)(self.raster_data.as_ptr()) };
     }
 }
 
 /// A new surface whose one reference the caller owns and gives up with `compositor_painting_surface_release()`. It
-/// takes over the Skia part, which it destroys with `destroy_skia_surface` once the last reference is gone. A GPU
+/// takes over the raster data, which it destroys with `destroy_raster_data` once the last reference is gone. A GPU
 /// surface names the backend context it renders with, which surfaces that can be drawn into each other share.
 ///
 /// # Safety
 ///
-/// `skia_surface` must be a live Skia part that `destroy_skia_surface` destroys.
+/// `raster_data` must be a live raster data that `destroy_raster_data` destroys.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn compositor_painting_surface_create(
     size: IntSize,
     gpu_backend_context: *const c_void,
-    skia_surface: *mut c_void,
-    destroy_skia_surface: unsafe extern "C" fn(*mut c_void),
+    raster_data: *mut c_void,
+    destroy_raster_data: unsafe extern "C" fn(*mut c_void),
 ) -> *const PaintingSurface {
-    let skia_surface = NonNull::new(skia_surface).expect("the C++ side passes the Skia part of the surface");
+    let raster_data = NonNull::new(raster_data).expect("the C++ side passes the raster data of the surface");
     PaintingSurface::into_ffi(Rc::new(PaintingSurface {
         size,
         gpu_backend_context,
-        skia_surface,
-        destroy_skia_surface,
+        raster_data,
+        destroy_raster_data,
     }))
 }
 
@@ -121,8 +121,8 @@ pub unsafe extern "C" fn compositor_painting_surface_release(surface: *const Pai
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn compositor_painting_surface_skia_surface(surface: &PaintingSurface) -> *mut c_void {
-    surface.skia_surface.as_ptr()
+pub extern "C" fn compositor_painting_surface_raster_data(surface: &PaintingSurface) -> *mut c_void {
+    surface.raster_data.as_ptr()
 }
 
 /// NB: A C++ function returns Gfx::IntSize in memory rather than in a register on Windows, so the size is written.
@@ -140,18 +140,18 @@ pub mod testing {
         pub static DESTROYED_SKIA_SURFACES: Cell<usize> = const { Cell::new(0) };
     }
 
-    unsafe extern "C" fn count_destroyed_skia_surface(_: *mut c_void) {
+    unsafe extern "C" fn count_destroyed_raster_data(_: *mut c_void) {
         DESTROYED_SKIA_SURFACES.with(|count| count.set(count.get() + 1));
     }
 
     pub fn surface_for_testing(size: IntSize, gpu_backend_context: usize) -> Rc<PaintingSurface> {
-        // SAFETY: The Skia part is a dangling pointer that only the counting destroy function sees.
+        // SAFETY: The raster data is a dangling pointer that only the counting destroy function sees.
         let surface = unsafe {
             compositor_painting_surface_create(
                 size,
                 gpu_backend_context as *const c_void,
                 NonNull::<u8>::dangling().as_ptr().cast(),
-                count_destroyed_skia_surface,
+                count_destroyed_raster_data,
             )
         };
         // SAFETY: The surface was just made with one reference, which this takes over.
@@ -165,7 +165,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn skia_part_is_destroyed_with_the_last_reference_from_either_side() {
+    fn raster_data_is_destroyed_with_the_last_reference_from_either_side() {
         let before = DESTROYED_SKIA_SURFACES.with(|count| count.get());
         let surface = surface_for_testing(IntSize { width: 4, height: 3 }, 0);
         let pointer = surface.as_ffi();

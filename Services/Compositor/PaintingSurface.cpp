@@ -68,7 +68,7 @@ NonnullRefPtr<PaintingSurface> PaintingSurface::adopt_impl(IntSize size, Nonnull
 
 PaintingSurface::Impl& PaintingSurface::impl() const
 {
-    return *static_cast<Impl*>(Compositor::RustFFI::compositor_painting_surface_skia_surface(this));
+    return *static_cast<Impl*>(Compositor::RustFFI::compositor_painting_surface_raster_data(this));
 }
 
 #if defined(AK_OS_MACOS) || defined(USE_VULKAN_DMABUF_IMAGES) || defined(USE_DIRECTX)
@@ -328,6 +328,27 @@ IntSize PaintingSurface::size() const
 IntRect PaintingSurface::rect() const
 {
     return { {}, size() };
+}
+
+int PaintingSurface::save_state() { return canvas().save(); }
+void PaintingSurface::restore_state(int count) { canvas().restoreToCount(count); }
+void PaintingSurface::translate(float x, float y) { canvas().translate(x, y); }
+void PaintingSurface::scale(float x, float y) { canvas().scale(x, y); }
+void PaintingSurface::clip_rect(IntRect rect) { canvas().clipRect(to_skia_rect(rect)); }
+IntRect PaintingSurface::device_clip() const
+{
+    auto bounds = canvas().getDeviceClipBounds();
+    return { bounds.x(), bounds.y(), bounds.width(), bounds.height() };
+}
+
+FloatMatrix4x4 PaintingSurface::paint_matrix() const
+{
+    auto matrix = canvas().getLocalToDevice();
+    FloatMatrix4x4 result;
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j)
+            result[i, j] = matrix.rc(i, j);
+    return result;
 }
 
 SkCanvas& PaintingSurface::canvas() const

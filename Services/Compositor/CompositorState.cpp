@@ -9,12 +9,16 @@
 #include <AK/StdLibExtras.h>
 #include <AK/TemporaryChange.h>
 #include <Compositor/BackingStoreFactory.h>
+#ifndef LADYBIRD_CPU_ONLY
 #include <Compositor/Canvas2DCommandPlayer.h>
+#endif
 #include <Compositor/CanvasHost.h>
 #include <Compositor/CompositorState.h>
 #include <Compositor/OpenGLContext.h>
+#ifndef LADYBIRD_CPU_ONLY
 #include <Compositor/SkiaUtils.h>
 #include <Compositor/VideoFrameSkia.h>
+#endif
 #include <LibCompositing/CanvasColorSpace.h>
 #include <LibCompositing/DisplayList/DisplayListCommand.h>
 #include <LibCompositing/DisplayList/RegisteredImageFrames.h>
@@ -27,8 +31,10 @@
 #include <LibMedia/Sinks/DisplayingVideoSink.h>
 #include <LibMediaCodecs/VideoFrame.h>
 #include <LibMediaCodecs/VideoSurface.h>
+#ifndef LADYBIRD_CPU_ONLY
 #include <core/SkCanvas.h>
 #include <core/SkImage.h>
+#endif
 
 namespace Compositor {
 
@@ -1067,7 +1073,7 @@ CompositorState::PresentedContext& CompositorState::presented_context(Web::Compo
     return *context;
 }
 
-Compositing::RustFFI::FfiRasterPainter CompositorState::begin_painting(Web::CompositorContextId context_id, Gfx::PaintingSurface& surface, RustFFI::PaintingResources resources, bool allows_lcd_text)
+Compositing::RustFFI::FfiRasterPainter CompositorState::begin_painting(Web::CompositorContextId context_id, Gfx::PaintingSurface& surface, RustFFI::PaintingResources resources, [[maybe_unused]] bool allows_lcd_text)
 {
     auto& context = presented_context(context_id);
     auto& raster_targets = context.raster_targets;
@@ -1081,6 +1087,7 @@ Compositing::RustFFI::FfiRasterPainter CompositorState::begin_painting(Web::Comp
         return player.begin(surface, raster_targets.overlay_fonts(), nullptr);
     }
 #endif
+#ifndef LADYBIRD_CPU_ONLY
     if (m_painting_depth == m_display_list_players.size())
         m_display_list_players.append(make<DisplayListPlayerSkia>(m_skia_backend_context));
     auto& player = *m_display_list_players[m_painting_depth++];
@@ -1090,6 +1097,7 @@ Compositing::RustFFI::FfiRasterPainter CompositorState::begin_painting(Web::Comp
     case RustFFI::PaintingResources::Overlays:
         return player.begin_painting(surface, raster_targets.overlay_fonts(), nullptr, raster_targets.overlay_raster_cache(), nullptr, nullptr);
     }
+#endif
     VERIFY_NOT_REACHED();
 }
 
@@ -1102,7 +1110,9 @@ void CompositorState::end_painting()
         return;
     }
 #endif
+#ifndef LADYBIRD_CPU_ONLY
     m_display_list_players[--m_painting_depth]->end_painting();
+#endif
 }
 
 namespace {
@@ -1188,7 +1198,12 @@ void CompositorState::set_drawn_video_sinks(Web::CompositorContextId context_id,
 
 void CompositorState::set_drawn_vector_images(Web::CompositorContextId context_id, ReadonlySpan<u64> vector_image_ids)
 {
+#ifndef LADYBIRD_CPU_ONLY
     presented_context(context_id).raster_targets.raster_cache().forget_vector_images_other_than(vector_image_ids);
+#else
+    (void)context_id;
+    (void)vector_image_ids;
+#endif
 }
 
 void CompositorState::set_drawn_fonts(Web::CompositorContextId context_id, ReadonlySpan<u64> font_ids)
@@ -1264,6 +1279,7 @@ CanvasHost& CompositorState::canvas_host_of(WebContentClientId client_id)
     return client->canvas_host();
 }
 
+#ifndef LADYBIRD_CPU_ONLY
 void CompositorState::begin_canvas_2d_painting(WebContentClientId client_id, Compositing::CanvasId canvas_id, RustFFI::FfiCanvas2DPainter& painter)
 {
     auto* client = web_content_client_if_present(client_id);
@@ -1281,6 +1297,7 @@ bool CompositorState::end_canvas_2d_painting_reporting_whether_video_frames_were
 {
     return exchange(m_canvas_host_painting_2d_context, nullptr)->end_2d_painting_reporting_whether_video_frames_were_sampled_on_gpu();
 }
+#endif
 
 bool CompositorState::begin_staged_rasterization(WebContentClientId client, u64 token, Compositing::RustFFI::FfiRasterPainter& painter)
 {
@@ -1305,9 +1322,13 @@ bool CompositorState::begin_staged_rasterization(WebContentClientId client, u64 
         return true;
     }
 #endif
+#ifndef LADYBIRD_CPU_ONLY
     rasterization->player = make<DisplayListPlayerSkia>(RefPtr<Gfx::SkiaBackendContext> {});
     painter = rasterization->player->begin_painting(*rasterization->target_surface, rasterization->fonts, &rasterization->image_frames, rasterization->raster_cache, nullptr, nullptr);
     return true;
+#else
+    return false;
+#endif
 }
 
 void CompositorState::finish_staged_rasterization(WebContentClientId client, u64 token)
@@ -1319,13 +1340,17 @@ void CompositorState::finish_staged_rasterization(WebContentClientId client, u64
     if (!rasterization.has_value())
         return;
 #ifdef ENABLE_THORVG_RASTERIZER
-    if ((*rasterization)->thorvg_player)
+    if ((*rasterization)->thorvg_player) {
         (*rasterization)->thorvg_player->end();
+        (*rasterization)->target_surface->flush();
+    }
 #endif
+#ifndef LADYBIRD_CPU_ONLY
     if (auto& player = (*rasterization)->player) {
         player->end_painting();
         DisplayListPlayerSkia::flush(*(*rasterization)->target_surface);
     }
+#endif
 }
 
 static bool video_frame_holds_high_dynamic_range(Media::VideoFrame const& frame)
@@ -1546,12 +1571,18 @@ u64 CompositorState::submit_frame(Gfx::PaintingSurface* surface)
             self->gpu_work_finished(token);
         });
     };
+#ifndef LADYBIRD_CPU_ONLY
     if (surface)
         DisplayListPlayerSkia::flush_async(*surface, move(did_finish));
     else if (m_skia_backend_context)
         m_skia_backend_context->flush_and_submit_async(move(did_finish));
     else
         did_finish();
+#else
+    if (surface)
+        surface->flush();
+    did_finish();
+#endif
     schedule_gpu_completion_check();
     return token;
 }
@@ -1574,7 +1605,9 @@ void CompositorState::hand_off_once_gpu_work_is_scheduled([[maybe_unused]] u64 t
         });
     };
 #endif
-#ifdef AK_OS_MACOS
+#if defined(LADYBIRD_CPU_ONLY)
+    deliver();
+#elif defined(AK_OS_MACOS)
     // The window server's reads of an IOSurface wait for GPU work that is already scheduled to write it.
     m_skia_backend_context->metal_context().when_committed_work_is_scheduled(move(deliver));
 #elif defined(AK_OS_WINDOWS) && defined(USE_DIRECTX)
@@ -1627,8 +1660,10 @@ void CompositorState::check_gpu_completions()
         return;
     }
 
+#ifndef LADYBIRD_CPU_ONLY
     if (m_skia_backend_context)
         m_skia_backend_context->check_async_work_completion();
+#endif
 
     if (m_gpu_work_in_flight.is_empty() && m_gpu_completion_timer)
         m_gpu_completion_timer->stop();
@@ -1645,6 +1680,7 @@ VSyncScheduler& CompositorState::vsync_scheduler_for_display(Optional<u64> displ
 
 namespace {
 
+#ifndef LADYBIRD_CPU_ONLY
 struct VideoFrameForRust {
     AK_ALLOC_WITH_KMALLOC;
 
@@ -1666,6 +1702,7 @@ struct ConvertedPixelsForRust {
 // NB: `ExportFormat` of libcompositing_rust lists the formats in this order.
 static_assert(to_underlying(Gfx::ExportFormat::Luminance8) == 0);
 static_assert(to_underlying(Gfx::ExportFormat::RGBA8888) == 7);
+#endif
 
 struct SharedMemoryMapping {
     AK_ALLOC_WITH_KMALLOC;
@@ -1685,10 +1722,12 @@ static CompositorState& state_of(void* host)
     return *static_cast<CompositorState*>(host);
 }
 
+#ifndef LADYBIRD_CPU_ONLY
 static SkCanvas& canvas_of(Gfx::PaintingSurface const* surface)
 {
     return surface->canvas();
 }
+#endif
 
 static Gfx::PaintingSurface& mutable_surface(Gfx::PaintingSurface const* surface)
 {
@@ -1715,37 +1754,55 @@ RustFFI::FfiRasterHost CompositorState::raster_host(CompositorState& state)
         .create_surface = [](void* host, Gfx::IntSize size, Gfx::PaintingSurface const* like, bool inherits_lcd_text) -> Gfx::PaintingSurface const* {
             auto skia_backend_context = like ? like->skia_backend_context() : state_of(host).m_skia_backend_context;
             auto text_antialiasing = Gfx::PaintingSurface::TextAntialiasing::Grayscale;
+#ifndef LADYBIRD_CPU_ONLY
             if (inherits_lcd_text && like && canvas_of(like).getBaseProps().pixelGeometry() != kUnknown_SkPixelGeometry)
                 text_antialiasing = Gfx::PaintingSurface::TextAntialiasing::LCD;
+#else
+            (void)inherits_lcd_text;
+#endif
             auto surface = Gfx::PaintingSurface::try_create_with_size(size, Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied, skia_backend_context, {}, text_antialiasing);
             if (surface.is_error())
                 return nullptr;
             return &surface.release_value().leak_ref();
         },
-        .surface_save = [](Gfx::PaintingSurface const* surface) { return canvas_of(surface).save(); },
-        .surface_restore_to_count = [](Gfx::PaintingSurface const* surface, i32 count) { canvas_of(surface).restoreToCount(count); },
-        .surface_translate = [](Gfx::PaintingSurface const* surface, float x, float y) { canvas_of(surface).translate(x, y); },
-        .surface_scale = [](Gfx::PaintingSurface const* surface, float x, float y) { canvas_of(surface).scale(x, y); },
-        .surface_clip_rect = [](Gfx::PaintingSurface const* surface, Gfx::IntRect rect) { canvas_of(surface).clipIRect(SkIRect::MakeXYWH(rect.x(), rect.y(), rect.width(), rect.height())); },
+        .surface_save = [](Gfx::PaintingSurface const* surface) { return mutable_surface(surface).save_state(); },
+        .surface_restore_to_count = [](Gfx::PaintingSurface const* surface, i32 count) { mutable_surface(surface).restore_state(count); },
+        .surface_translate = [](Gfx::PaintingSurface const* surface, float x, float y) { mutable_surface(surface).translate(x, y); },
+        .surface_scale = [](Gfx::PaintingSurface const* surface, float x, float y) { mutable_surface(surface).scale(x, y); },
+        .surface_clip_rect = [](Gfx::PaintingSurface const* surface, Gfx::IntRect rect) { mutable_surface(surface).clip_rect(rect); },
         .surface_clear = [](Gfx::PaintingSurface const* surface, Gfx::Color color) {
 #ifdef ENABLE_THORVG_RASTERIZER
             if (DisplayListPlayerThorVG::enabled())
                 return DisplayListPlayerThorVG::clear(mutable_surface(surface), color);
 #endif
-            canvas_of(surface).clear(Gfx::to_skia_color(color)); },
+#ifndef LADYBIRD_CPU_ONLY
+            canvas_of(surface).clear(Gfx::to_skia_color(color));
+#endif
+        },
         .surface_draw_surface = [](Gfx::PaintingSurface const* target, Gfx::PaintingSurface const* source, Gfx::IntRect source_rect, Gfx::IntRect target_rect, RustFFI::SurfaceBlend blend) {
 #ifdef ENABLE_THORVG_RASTERIZER
             if (DisplayListPlayerThorVG::enabled())
                 return DisplayListPlayerThorVG::blit(mutable_surface(target), *source, source_rect, target_rect, blend == RustFFI::SurfaceBlend::Source);
 #endif
+#ifndef LADYBIRD_CPU_ONLY
             auto image = source->sk_image_snapshot<sk_sp<SkImage>>();
             SkPaint paint;
             paint.setBlendMode(blend == RustFFI::SurfaceBlend::Source ? SkBlendMode::kSrc : SkBlendMode::kSrcOver);
-            canvas_of(target).drawImageRect(image.get(), Gfx::to_skia_rect(source_rect), Gfx::to_skia_rect(target_rect), SkSamplingOptions {}, &paint, SkCanvas::kStrict_SrcRectConstraint); },
+            canvas_of(target).drawImageRect(image.get(), Gfx::to_skia_rect(source_rect), Gfx::to_skia_rect(target_rect), SkSamplingOptions {}, &paint, SkCanvas::kStrict_SrcRectConstraint);
+#endif
+        },
+#ifndef LADYBIRD_CPU_ONLY
         .flush_surface = [](Gfx::PaintingSurface const* surface) { DisplayListPlayerSkia::flush(mutable_surface(surface)); },
+#else
+        .flush_surface = [](Gfx::PaintingSurface const* surface) { mutable_surface(surface).flush(); },
+#endif
         .begin_painting = [](void* host, u64 context_id, Gfx::PaintingSurface const* surface, RustFFI::PaintingResources resources, bool allows_lcd_text, Compositing::RustFFI::FfiRasterPainter* painter) { *painter = state_of(host).begin_painting(Context { context_id }, mutable_surface(surface), resources, allows_lcd_text); },
         .end_painting = [](void* host) { state_of(host).end_painting(); },
+#ifndef LADYBIRD_CPU_ONLY
         .start_raster_cache_frame = [](void* host, u64 context_id) { state_of(host).presented_context(Context { context_id }).raster_targets.raster_cache().drop_what_was_not_used_since_last_frame(); },
+#else
+        .start_raster_cache_frame = [](void*, u64) { },
+#endif
         .create_store = [](void* host, u64 context_id, RustFFI::StoreKind kind, Gfx::IntSize size, void* window_server, RustFFI::FfiNewStore* new_store) { return state_of(host).create_store(Context { context_id }, kind, size, static_cast<WindowServer*>(window_server), *new_store); },
         .publish_stores = [](void* host, u64 presentation_id, u64 context_id, bool added, ReadonlySpan<i32> bitmap_ids, ReadonlySpan<void*> images) { state_of(host).publish_stores(PresentationId { presentation_id }, Context { context_id }, added, bitmap_ids, images); },
         .retire_published_stores = [](void* host, u64 presentation_id, u64 context_id, ReadonlySpan<i32> bitmap_ids) { state_of(host).retire_published_stores(PresentationId { presentation_id }, Context { context_id }, bitmap_ids); },
@@ -1852,6 +1909,7 @@ RustFFI::FfiRasterHost CompositorState::raster_host(CompositorState& state)
         .begin_staged_rasterization = [](void* host, u64 client, u64 token, Compositing::RustFFI::FfiRasterPainter* painter) { return state_of(host).begin_staged_rasterization(WebContentClientId { client }, token, *painter); },
         .finish_staged_rasterization = [](void* host, u64 client, u64 token) { state_of(host).finish_staged_rasterization(WebContentClientId { client }, token); },
         .reserve_canvas_ids = [](void* host, u64 count) { return state_of(host).m_canvas_surface_registry.reserve_canvas_ids(count).value(); },
+#ifndef LADYBIRD_CPU_ONLY
         .create_canvas_2d_context = [](void* host, u64 client, Compositing::CanvasId canvas_id, Gfx::IntSize size, bool alpha, bool will_read_frequently, Web::Bindings::PredefinedColorSpace color_space) { return state_of(host).canvas_host_of(WebContentClientId { client }).create_2d_context(canvas_id, size, alpha, will_read_frequently, Compositing::gfx_color_space_for(color_space)); },
         .destroy_canvas_2d_context = [](void* host, u64 client, Compositing::CanvasId canvas_id) { state_of(host).canvas_host_of(WebContentClientId { client }).destroy_2d_context(canvas_id); },
         .read_back_canvas_2d_pixels = [](void* host, u64 client, Compositing::CanvasId canvas_id, Gfx::IntRect rect, u8 alpha_type, Web::Bindings::PredefinedColorSpace color_space, u8* pixels, size_t pixels_size, Gfx::IntSize* size) {
@@ -1943,6 +2001,27 @@ RustFFI::FfiRasterHost CompositorState::raster_host(CompositorState& state)
             };
             (void)owned_pixels.leak_ptr();
             return RustFFI::FfiImageConversionOutcome::Converted; },
+#else
+        .create_canvas_2d_context = [](auto...) { return false; },
+        .destroy_canvas_2d_context = [](auto...) { },
+        .read_back_canvas_2d_pixels = [](auto...) { return false; },
+        .begin_canvas_2d_painting = [](void*, u64, Compositing::CanvasId, RustFFI::FfiCanvas2DPainter* painter) { *painter = { nullptr, [](void*, Compositing::DisplayListCommandType, ReadonlyBytes) { } }; },
+        .end_canvas_2d_painting = [](auto...) { return false; },
+        .present_canvas_2d_context = [](auto...) { return false; },
+        .flush_canvas_2d_contexts = [](auto...) { },
+        .gl_proc_address = [](auto...) { return static_cast<void const*>(nullptr); },
+        .create_webgl_context = [](auto...) { return false; },
+        .destroy_webgl_context = [](auto...) { },
+        .make_webgl_context_current = [](void*, u64, Compositing::CanvasId, RustFFI::DefaultBuffers* defaults) { *defaults = {}; },
+        .set_webgl_drawing_buffer_size = [](auto...) { },
+        .present_webgl_context = [](auto...) { return RustFFI::PresentOutcome::NoDrawingBuffer; },
+        .read_back_webgl_drawing_buffer = [](auto...) { return false; },
+        .webgl_can_copy_images_into_textures = [](auto...) { return false; },
+        .held_video_frame = [](auto...) { return false; },
+        .video_frame_image = [](void*, void*, RustFFI::FfiCppObject* image) { *image = {}; },
+        .copy_video_frame_image_into_bound_texture = [](auto...) { return false; },
+        .convert_image_source_for_webgl = [](auto...) { return RustFFI::FfiImageConversionOutcome::Failed; },
+#endif
     };
 }
 

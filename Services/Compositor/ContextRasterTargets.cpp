@@ -4,13 +4,17 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Utf8View.h>
 #include <Compositor/ContextRasterTargets.h>
-#include <Compositor/FontSkia.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
-#include <core/SkFont.h>
-#include <core/SkFontMetrics.h>
-#include <core/SkFontTypes.h>
+
+#ifndef LADYBIRD_CPU_ONLY
+#    include <Compositor/FontSkia.h>
+#    include <core/SkFont.h>
+#    include <core/SkFontMetrics.h>
+#    include <core/SkFontTypes.h>
+#endif
 
 namespace Compositor {
 
@@ -21,12 +25,20 @@ ContextRasterTargets::ContextRasterTargets(OwnedCanvasSurfaces canvas_surfaces)
 
 void ContextRasterTargets::retain_only_fonts(ReadonlySpan<u64> font_ids)
 {
+#ifdef LADYBIRD_CPU_ONLY
+    (void)m_fonts.retain_only(font_ids);
+#else
     m_raster_cache.forget_fonts(m_fonts.retain_only(font_ids));
+#endif
 }
 
 void ContextRasterTargets::retain_only_image_frames(ReadonlySpan<u64> image_frame_ids)
 {
+#ifdef LADYBIRD_CPU_ONLY
+    (void)m_image_frames.retain_only(image_frame_ids);
+#else
     m_raster_cache.forget_image_frames(m_image_frames.retain_only(image_frame_ids));
+#endif
 }
 
 static RefPtr<Gfx::Font> fallback_font_of_overlay_labels(float font_size_in_points)
@@ -51,11 +63,20 @@ Optional<OverlayLabel> ContextRasterTargets::shape_overlay_label(Optional<String
         font = fallback_font_of_overlay_labels(font_size_in_points);
     if (!font)
         return {};
+    OverlayLabel label {};
+#ifdef LADYBIRD_CPU_ONLY
+    for (auto code_point : Utf8View(text)) {
+        label.glyph_ids.append(font->glyph_id_for_code_point(code_point));
+        label.glyph_x_positions.append(label.width);
+        label.width += font->horizontal_advance_of_code_point(code_point).value_or(0) * device_pixel_ratio;
+    }
+    label.ascent = -font->pixel_metrics().ascent * device_pixel_ratio;
+    label.descent = font->pixel_metrics().descent * device_pixel_ratio;
+#else
     auto skia_font = Compositor::skia_font(*font, static_cast<float>(device_pixel_ratio));
     if (!skia_font.has_value())
         return {};
 
-    OverlayLabel label;
     auto glyph_count = skia_font->countText(text.characters_without_null_termination(), text.length(), SkTextEncoding::kUTF8);
     Vector<SkGlyphID> glyphs;
     glyphs.resize(glyph_count);
@@ -70,6 +91,7 @@ Optional<OverlayLabel> ContextRasterTargets::shape_overlay_label(Optional<String
     skia_font->getMetrics(&font_metrics);
     label.ascent = font_metrics.fAscent;
     label.descent = font_metrics.fDescent;
+#endif
     label.font_ascent = font->pixel_metrics().ascent;
     label.font_id = m_overlay_fonts.add(*font).value();
     return label;
@@ -84,7 +106,9 @@ bool ContextRasterTargets::set_drawn_video_sinks(ReadonlySpan<u64> handles)
     for (auto handle : m_drawn_video_sinks) {
         if (drawn_video_sinks.contains(handle))
             continue;
+#ifndef LADYBIRD_CPU_ONLY
         m_raster_cache.forget_video_sink(handle);
+#endif
         changed = true;
     }
     if (!changed)

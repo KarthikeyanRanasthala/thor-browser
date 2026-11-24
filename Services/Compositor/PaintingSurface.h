@@ -14,6 +14,7 @@
 #include <Compositor/SkiaBackendContext.h>
 #include <LibGfx/Color.h>
 #include <LibGfx/ColorSpace.h>
+#include <LibGfx/Matrix4x4.h>
 #include <LibGfx/Size.h>
 
 #ifdef USE_VULKAN_DMABUF_IMAGES
@@ -95,15 +96,25 @@ public:
     IntSize size() const;
     IntRect rect() const;
 
+    int save_state();
+    void restore_state(int);
+    void translate(float, float);
+    void scale(float, float);
+    void clip_rect(IntRect);
+    IntRect device_clip() const;
+    FloatMatrix4x4 paint_matrix() const;
+
+#ifndef LADYBIRD_CPU_ONLY
     SkCanvas& canvas() const;
     SkSurface& sk_surface() const;
 
     template<typename T>
     T sk_image_snapshot() const;
+#endif
 
     RefPtr<SkiaBackendContext> skia_backend_context() const;
 
-    // Whether the surface draws into an image shared with another process, rather than one Skia allocated.
+    // Whether the surface wraps a platform image that can be presented directly.
     bool wraps_shared_image() const;
 
     // Runs after every flush.

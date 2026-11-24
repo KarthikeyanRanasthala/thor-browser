@@ -310,17 +310,20 @@ ninja -C MyBuildDir run-ladybird
 
 With `ENABLE_THORVG_RASTERIZER=ON`, Ladybird defaults to a CPU compositor that replays the page display list into the destination bitmap using ThorVG 1.2. Ladybird supplies the font, shaped glyph IDs and positions. Its HarfBuzz and CoreText outline code supplies the contours that ThorVG fills or strokes. Text available only as a color bitmap is skipped.
 
-The painter supports solid shapes and strokes, intersecting clips, affine transforms, opacity and common blend modes, decoded images, inline vector images, and linear and radial CSS gradients. Gradients use ThorVG's color interpolation. Filters are omitted, masked content and unsupported paint commands are skipped, and unsupported layer blends use source-over. Video elements draw the current decoded frame using CPU conversion and ThorVG image sampling. Canvas display-list commands and repeated pattern tiles are currently skipped. Skia is still linked for other Ladybird components and for geometry and surface management. Use `--renderer=skia` to select Ladybird's regular page painter.
+The painter supports solid shapes and strokes, intersecting clips, affine transforms, opacity and common blend modes, decoded images, inline vector images, and linear and radial CSS gradients. Gradients use ThorVG's color interpolation. ThorVG applies alpha and luminance masks using the paint commands it supports. Filters and unsupported paint commands are skipped, and unsupported layer blends use source-over. Video elements draw the current decoded frame using CPU conversion and ThorVG image sampling. Canvas display-list commands and repeated pattern tiles are currently skipped.
+
+On macOS, the `ThorVG` preset builds the browser and its helper processes without Skia. The Rust compositor handles scrolling, tiles, damage and frame presentation. ThorVG draws into CPU-backed shared bitmaps. Canvas 2D and WebGL context creation return null in this preset, including on OffscreenCanvas. The macOS updater is disabled.
 
 With the sibling ThorVG checkout installed under `build-cpu/install`, run the following from the Ladybird checkout.
 
 ```sh
 export PKG_CONFIG_PATH="$PWD/../thorvg/build-cpu/install/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-cmake --preset Release -DENABLE_THORVG_RASTERIZER=ON
-cmake --build Build/release --target Ladybird TestCompositor
-ctest --test-dir Build/release -R '^TestCompositor$' --output-on-failure
-open -n Build/release/bin/Ladybird.app --args --temporary-profile --renderer=thorvg https://www.google.com/
+python3 Meta/ladybird.py build --preset ThorVG -j 10 Ladybird TestThorVGPainter
+ctest --test-dir Build/thorvg -R TestThorVGPainter --output-on-failure
+open -n Build/thorvg/bin/Ladybird.app --args --temporary-profile https://www.google.com/
 ```
+
+To build both rasterizers, configure the Release preset with `-DENABLE_THORVG_RASTERIZER=ON`. Select the Skia page painter at runtime with `--renderer=skia`.
 
 ### Building with limited system memory
 

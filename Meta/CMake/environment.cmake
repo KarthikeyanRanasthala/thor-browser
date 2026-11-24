@@ -24,6 +24,9 @@ if (DEFINED LADYBIRD_VCPKG_TYPE)
     # Each optional dependency is a feature of vcpkg.json that an option selects. The options are declared after
     # project(), so one that is not set yet has its default. Keep in sync with MANIFEST_FEATURE_OPTIONS in
     # Meta/Utils/vcpkg_deps.py.
+    if (NOT DEFINED ENABLE_SKIA OR ENABLE_SKIA)
+        list(APPEND VCPKG_MANIFEST_FEATURES "skia-renderer")
+    endif()
     if (LADYBIRD_BUILD_QT AND (NOT DEFINED ENABLE_GUI_TARGETS OR ENABLE_GUI_TARGETS))
         list(APPEND VCPKG_MANIFEST_FEATURES "qt")
     endif()

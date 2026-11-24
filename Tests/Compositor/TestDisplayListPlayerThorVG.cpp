@@ -13,15 +13,14 @@
 #include <LibMediaCodecs/VideoSurface.h>
 #include <LibTest/TemporaryDirectory.h>
 #include <LibTest/TestCase.h>
-#include <core/SkCanvas.h>
 
 TEST_CASE(thorvg_draws_into_existing_pixels_and_restores_nested_clips)
 {
     auto bitmap = MUST(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied, { 48, 32 }));
     auto surface = Gfx::PaintingSurface::wrap_bitmap(*bitmap);
     Compositor::DisplayListPlayerThorVG::clear(*surface, Gfx::Color::White);
-    surface->canvas().clipIRect(SkIRect::MakeLTRB(3, 2, 45, 31));
-    surface->canvas().translate(4, 0);
+    surface->clip_rect({ 3, 2, 42, 29 });
+    surface->translate(4, 0);
     Compositor::DrawnFonts fonts;
     Compositor::DisplayListPlayerThorVG player;
     auto painter = player.begin(*surface, fonts, nullptr);
@@ -40,6 +39,55 @@ TEST_CASE(thorvg_draws_into_existing_pixels_and_restores_nested_clips)
     EXPECT_EQ(bitmap->get_pixel(3, 4), Gfx::Color(Gfx::Color::White));
     EXPECT_EQ(bitmap->get_pixel(7, 1), Gfx::Color(Gfx::Color::White));
     EXPECT_EQ(bitmap->get_pixel(20, 8), Gfx::Color(Gfx::Color::White));
+}
+
+TEST_CASE(thorvg_masks_content_without_painting_the_mask_onto_the_page)
+{
+    auto bitmap = MUST(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied, { 32, 16 }));
+    auto surface = Gfx::PaintingSurface::wrap_bitmap(*bitmap);
+    Compositor::DisplayListPlayerThorVG::clear(*surface, Gfx::Color::White);
+    Compositor::DrawnFonts fonts;
+    Compositor::DisplayListPlayerThorVG player;
+    auto painter = player.begin(*surface, fonts, nullptr);
+    auto fill = [&](Gfx::IntRect rect, Gfx::Color color) {
+        Compositing::RustFFI::ResolvedFillRect command { rect, color, Gfx::CompositingAndBlendingOperator::Normal };
+        painter.fill_rect(painter.context, &command);
+    };
+    Compositing::ReplayMask mask { { 4, 0, 24, 16 }, Gfx::MaskKind::Alpha };
+    painter.push_mask(painter.context, &mask, nullptr);
+    fill({ 0, 0, 32, 16 }, Gfx::Color::Blue);
+    painter.begin_mask_content(painter.context, &mask);
+    fill({ 0, 0, 10, 16 }, Gfx::Color::Black);
+    fill({ 10, 0, 10, 16 }, Gfx::Color(0, 0, 0, 128));
+    painter.pop_mask(painter.context);
+
+    Compositing::RustFFI::IsolatedGroup group { { 0, 8, 32, 8 }, 1, Gfx::CompositingAndBlendingOperator::Normal, nullptr, 0 };
+    painter.begin_isolated_group(painter.context, &group);
+    fill({ 0, 8, 32, 8 }, Gfx::Color::Red);
+    painter.begin_isolated_group_mask(painter.context, Gfx::MaskKind::Luminance);
+    fill({ 0, 8, 16, 8 }, Gfx::Color::Black);
+    fill({ 16, 8, 16, 8 }, Gfx::Color::White);
+    painter.end_isolated_group_mask(painter.context);
+    painter.end_isolated_group(painter.context);
+    painter.push_mask(painter.context, &mask, nullptr);
+    fill({ 4, 0, 24, 16 }, Gfx::Color::Black);
+    painter.begin_mask_content(painter.context, &mask);
+    painter.pop_mask(painter.context);
+    fill({ 29, 0, 3, 3 }, Gfx::Color::Green);
+    player.end();
+
+    EXPECT_EQ(bitmap->get_pixel(2, 2), Gfx::Color(Gfx::Color::White));
+    EXPECT_EQ(bitmap->get_pixel(6, 2), Gfx::Color(Gfx::Color::Blue));
+    auto faded = bitmap->get_pixel(12, 2);
+    EXPECT(faded.red() >= 126 && faded.red() <= 129);
+    EXPECT_EQ(faded.red(), faded.green());
+    EXPECT_EQ(faded.blue(), 255);
+    EXPECT_EQ(bitmap->get_pixel(22, 2), Gfx::Color(Gfx::Color::White));
+    EXPECT_EQ(bitmap->get_pixel(6, 12), Gfx::Color(Gfx::Color::Blue));
+    auto red = bitmap->get_pixel(22, 12);
+    EXPECT_EQ(red.red(), 255);
+    EXPECT(red.green() <= 1 && red.blue() <= 1);
+    EXPECT_EQ(bitmap->get_pixel(30, 1), Gfx::Color(Gfx::Color::Green));
 }
 
 TEST_CASE(thorvg_draws_both_positioned_glyphs_from_a_registered_font)

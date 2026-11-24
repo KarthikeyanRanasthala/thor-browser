@@ -7,11 +7,11 @@
 #include <memory>
 #include <thorvg.h>
 
-class SkPath;
+#include <LibGfx/PathData.h>
 
 namespace Compositor {
 
-bool append_thorvg_path(tvg::Shape&, SkPath const&);
+tvg::Shape* thorvg_shape(Gfx::PathData const&, Gfx::WindingRule);
 
 inline bool thorvg_runtime_ready()
 {

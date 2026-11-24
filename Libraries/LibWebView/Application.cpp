@@ -557,6 +557,10 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
 
     create_platform_arguments(args_parser);
     args_parser.parse(m_arguments);
+#ifdef LADYBIRD_CPU_ONLY
+    if (renderer != "thorvg"sv)
+        return Error::from_string_literal("This build supports only --renderer=thorvg");
+#endif
     if (renderer != "skia"sv && renderer != "thorvg"sv)
         return Error::from_string_literal("--renderer must be skia or thorvg");
     if (renderer == "thorvg"sv) {

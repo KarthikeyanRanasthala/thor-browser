@@ -201,48 +201,6 @@
     },
     "simdjson",
     "simdutf",
-    {
-      "name": "skia",
-      "platform": "osx",
-      "default-features": false,
-      "features": [
-        "metal",
-        "fontconfig",
-        "harfbuzz",
-        "icu"
-      ]
-    },
-    {
-      "name": "skia",
-      "platform": "windows",
-      "default-features": false,
-      "features": [
-        "freetype",
-        "harfbuzz",
-        "icu",
-        "direct3d"
-      ]
-    },
-    {
-      "name": "skia",
-      "platform": "linux | bsd",
-      "default-features": false,
-      "features": [
-        "freetype",
-        "fontconfig",
-        "harfbuzz",
-        "icu",
-        "vulkan"
-      ]
-    },
-    {
-      "name": "skia",
-      "platform": "android",
-      "default-features": false,
-      "features": [
-        "vulkan"
-      ]
-    },
     "sqlite3",
     {
       "name": "tiff",
@@ -316,6 +274,53 @@
         {
           "name": "sparkle",
           "platform": "osx"
+        }
+      ]
+    },
+    "skia-renderer": {
+      "description": "Build the Skia compositor backend",
+      "dependencies": [
+        {
+          "name": "skia",
+          "platform": "osx",
+          "default-features": false,
+          "features": [
+            "metal",
+            "fontconfig",
+            "harfbuzz",
+            "icu"
+          ]
+        },
+        {
+          "name": "skia",
+          "platform": "windows",
+          "default-features": false,
+          "features": [
+            "freetype",
+            "harfbuzz",
+            "icu",
+            "direct3d"
+          ]
+        },
+        {
+          "name": "skia",
+          "platform": "linux | bsd",
+          "default-features": false,
+          "features": [
+            "freetype",
+            "fontconfig",
+            "harfbuzz",
+            "icu",
+            "vulkan"
+          ]
+        },
+        {
+          "name": "skia",
+          "platform": "android",
+          "default-features": false,
+          "features": [
+            "vulkan"
+          ]
         }
       ]
     }

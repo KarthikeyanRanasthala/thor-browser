@@ -37,7 +37,7 @@ static NonnullRefPtr<Gfx::PaintingSurface> create_gpu_painting_surface_with_bitm
 
 static NonnullRefPtr<Gfx::PaintingSurface> create_shareable_bitmap_backing_store([[maybe_unused]] Gfx::IntSize size, Gfx::SharedImageBuffer& buffer, RefPtr<Gfx::SkiaBackendContext> const& skia_backend_context)
 {
-#ifdef AK_OS_MACOS
+#if defined(AK_OS_MACOS) && !defined(LADYBIRD_CPU_ONLY)
     if (skia_backend_context)
         return Gfx::PaintingSurface::create_from_shared_image_buffer(buffer, *skia_backend_context);
 #else

@@ -2,64 +2,82 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include "ThorVGRaster.h"
-#include <core/SkPath.h>
-#include <core/SkRRect.h>
+#include <AK/Math.h>
+#include <Compositor/ThorVGRaster.h>
+#include <LibGfx/PathData.h>
 
 namespace Compositor {
 
-bool append_thorvg_path(tvg::Shape& shape, SkPath const& path)
+static void quadratic(tvg::Shape& shape, Gfx::FloatPoint a, Gfx::FloatPoint b, Gfx::FloatPoint c)
 {
-    using enum tvg::Result;
-    SkRect oval;
-    if (path.isOval(&oval))
-        return shape.appendCircle(oval.centerX(), oval.centerY(), oval.width() / 2, oval.height() / 2) == Success;
+    auto first = a + (b - a) * (2.f / 3);
+    auto second = c + (b - c) * (2.f / 3);
+    shape.cubicTo(first.x(), first.y(), second.x(), second.y(), c.x(), c.y());
+}
 
-    SkRRect rounded;
-    if (path.isRRect(&rounded) && rounded.isSimple()) {
-        auto rect = rounded.rect();
-        auto radii = rounded.radii(SkRRect::kUpperLeft_Corner);
-        return shape.appendRect(rect.x(), rect.y(), rect.width(), rect.height(), radii.x(), radii.y()) == Success;
+// Split a rational quadratic in homogeneous coordinates until polynomial quadratics
+// approximate it to a fraction of a local pixel. Bound the work for extreme weights.
+static void conic(tvg::Shape& shape, Gfx::FloatPoint a, Gfx::FloatPoint b, Gfx::FloatPoint c, float w, unsigned depth)
+{
+    auto t = w / (1 + w);
+    auto ab = a + (b - a) * t;
+    auto cb = c + (b - c) * t;
+    auto middle = ab + (cb - ab) * .5f;
+    auto polynomial_middle = (a + b * 2.f + c) * .25f;
+    if (depth == 8 || middle.distance_from(polynomial_middle) <= .05f) {
+        quadratic(shape, a, b, c);
+        return;
     }
+    auto split_weight = sqrtf(.5f + .5f * w);
+    conic(shape, a, ab, middle, split_weight, depth + 1);
+    conic(shape, middle, cb, c, split_weight, depth + 1);
+}
 
-    auto quad = [&](SkPoint start, SkPoint control, SkPoint end) {
-        auto c1 = start + (control - start) * (2.f / 3);
-        auto c2 = end + (control - end) * (2.f / 3);
-        return shape.cubicTo(c1.x(), c1.y(), c2.x(), c2.y(), end.x(), end.y());
-    };
-    auto iter = path.iter();
-    while (auto record = iter.next()) {
-        auto p = record->fPoints;
-        tvg::Result result;
-        switch (record->fVerb) {
-        case SkPathVerb::kMove:
-            result = shape.moveTo(p[0].x(), p[0].y());
+tvg::Shape* thorvg_shape(Gfx::PathData const& path, Gfx::WindingRule rule)
+{
+    auto* shape = tvg::Shape::gen();
+    shape->fillRule(rule == Gfx::WindingRule::EvenOdd ? tvg::FillRule::EvenOdd : tvg::FillRule::NonZero);
+    size_t point = 0;
+    size_t weight = 0;
+    Gfx::FloatPoint current, start;
+    for (auto verb : path.verbs) {
+        if (verb == Gfx::PathVerb::Close) {
+            shape->close();
+            current = start;
+            continue;
+        }
+        auto p = path.points[point++];
+        switch (verb) {
+        case Gfx::PathVerb::Move:
+            shape->moveTo(p.x(), p.y());
+            start = p;
             break;
-        case SkPathVerb::kLine:
-            result = shape.lineTo(p[1].x(), p[1].y());
+        case Gfx::PathVerb::Line:
+            shape->lineTo(p.x(), p.y());
             break;
-        case SkPathVerb::kQuad:
-            result = quad(p[0], p[1], p[2]);
-            break;
-        case SkPathVerb::kCubic:
-            result = shape.cubicTo(p[1].x(), p[1].y(), p[2].x(), p[2].y(), p[3].x(), p[3].y());
-            break;
-        case SkPathVerb::kClose:
-            result = shape.close();
-            break;
-        case SkPathVerb::kConic: {
-            SkPoint points[9];
-            int count = SkPath::ConvertConicToQuads(p[0], p[1], p[2], record->fConicWeight, points, 2);
-            result = Success;
-            for (int i = 0; i < count && result == Success; ++i)
-                result = quad(points[2 * i], points[2 * i + 1], points[2 * i + 2]);
+        case Gfx::PathVerb::Quad:
+        case Gfx::PathVerb::Conic: {
+            auto end = path.points[point++];
+            if (verb == Gfx::PathVerb::Quad)
+                quadratic(*shape, current, p, end);
+            else
+                conic(*shape, current, p, end, path.conic_weights[weight++], 0);
+            p = end;
             break;
         }
+        case Gfx::PathVerb::Cubic: {
+            auto control = path.points[point++];
+            auto end = path.points[point++];
+            shape->cubicTo(p.x(), p.y(), control.x(), control.y(), end.x(), end.y());
+            p = end;
+            break;
         }
-        if (result != Success)
-            return false;
+        case Gfx::PathVerb::Close:
+            VERIFY_NOT_REACHED();
+        }
+        current = p;
     }
-    return true;
+    return shape;
 }
 
 }

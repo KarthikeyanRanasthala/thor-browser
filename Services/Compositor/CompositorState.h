@@ -16,7 +16,9 @@
 #include <Compositor/CanvasSurfaceRegistry.h>
 #include <Compositor/CompositorCore.h>
 #include <Compositor/ContextRasterTargets.h>
+#ifndef LADYBIRD_CPU_ONLY
 #include <Compositor/DisplayListPlayerSkia.h>
+#endif
 #ifdef ENABLE_THORVG_RASTERIZER
 #    include <Compositor/DisplayListPlayerThorVG.h>
 #endif
@@ -274,11 +276,15 @@ private:
 
         DrawnFonts fonts;
         DrawnImageFrames image_frames;
+#ifndef LADYBIRD_CPU_ONLY
         DisplayListRasterCache raster_cache;
+#endif
         Gfx::ShareableBitmap target_bitmap;
         RefPtr<Gfx::PaintingSurface> target_surface;
         // Rasters on the CPU, so the pixels match a raster of the same list in any other process.
+#ifndef LADYBIRD_CPU_ONLY
         OwnPtr<DisplayListPlayerSkia> player;
+#endif
 #ifdef ENABLE_THORVG_RASTERIZER
         OwnPtr<DisplayListPlayerThorVG> thorvg_player;
 #endif
@@ -302,9 +308,13 @@ private:
 
     RefPtr<Gfx::SkiaBackendContext> m_skia_backend_context;
     CanvasSurfaceRegistry m_canvas_surface_registry;
+#ifndef LADYBIRD_CPU_ONLY
     CanvasHost* m_canvas_host_painting_2d_context { nullptr };
+#endif
     // A context nested in another is painted while the frame of the other is, by a player of its own.
+#ifndef LADYBIRD_CPU_ONLY
     Vector<NonnullOwnPtr<DisplayListPlayerSkia>> m_display_list_players;
+#endif
 #ifdef ENABLE_THORVG_RASTERIZER
     Vector<NonnullOwnPtr<DisplayListPlayerThorVG>> m_thorvg_players;
 #endif

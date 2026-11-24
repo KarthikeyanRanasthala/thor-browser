@@ -415,6 +415,11 @@ JS::ThrowCompletionOr<HTMLCanvasElement::RenderingContext> HTMLCanvasElement::ge
 
     TRY(throw_if_control_transferred_to_offscreen());
 
+#ifdef LADYBIRD_CPU_ONLY
+    if (type.is_one_of(u"2d"sv, u"webgl"sv, u"webgl2"sv, u"experimental-webgl"sv))
+        return Empty {};
+#endif
+
     // AD-HOC: Converting the options can run script that transfers control of this canvas to an OffscreenCanvas, so
     //         we check for a placeholder canvas again after each conversion.
     if (type == u"2d"sv) {

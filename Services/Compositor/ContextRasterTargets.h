@@ -15,7 +15,9 @@
 #include <AK/StringView.h>
 #include <Compositor/CanvasSurfaceRegistry.h>
 #include <Compositor/CompositorCoreHost.h>
+#ifndef LADYBIRD_CPU_ONLY
 #include <Compositor/DisplayListRasterCache.h>
+#endif
 #include <Compositor/DrawnResources.h>
 #include <Compositor/PresentableSurface.h>
 #include <LibGfx/Size.h>
@@ -45,12 +47,16 @@ public:
     DrawnImageFrames const& image_frames() const { return m_image_frames; }
     void retain_only_fonts(ReadonlySpan<u64> font_ids);
     void retain_only_image_frames(ReadonlySpan<u64> image_frame_ids);
+#ifndef LADYBIRD_CPU_ONLY
     DisplayListRasterCache& raster_cache() { return m_raster_cache; }
+#endif
     OwnedCanvasSurfaces const& canvas_surfaces() const { return m_canvas_surfaces; }
 
     // The fonts that the overlays draw with, apart from those of the page.
     DrawnFonts const& overlay_fonts() const { return m_overlay_fonts; }
+#ifndef LADYBIRD_CPU_ONLY
     DisplayListRasterCache& overlay_raster_cache() { return m_overlay_raster_cache; }
+#endif
     // Shapes a label of the overlays, in a font that the overlays' fonts then hold.
     Optional<OverlayLabel> shape_overlay_label(Optional<StringView> font_family, float font_size_in_points, double device_pixel_ratio, StringView text);
 
@@ -62,10 +68,14 @@ public:
 private:
     DrawnFonts m_fonts;
     DrawnImageFrames m_image_frames;
+#ifndef LADYBIRD_CPU_ONLY
     DisplayListRasterCache m_raster_cache;
+#endif
     OwnedCanvasSurfaces m_canvas_surfaces;
     DrawnFonts m_overlay_fonts;
+#ifndef LADYBIRD_CPU_ONLY
     DisplayListRasterCache m_overlay_raster_cache;
+#endif
     HashTable<Media::VideoSinkHandle> m_drawn_video_sinks;
 };
 

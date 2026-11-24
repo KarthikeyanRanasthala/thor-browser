@@ -1,28 +1,17 @@
 set(SOURCES
     AnimatedImage.cpp
     BackingStoreFactory.cpp
-    BitmapExport.cpp
-    Canvas2DCommandPlayer.cpp
-    CanvasHost.cpp
-    ColorSpaceSkia.cpp
     CompositorCore.cpp
     CompositorState.cpp
+    SurfaceReadback.cpp
     ContextRasterTargets.cpp
-    DisplayListPlayerSkia.cpp
-    DisplayListRasterCache.cpp
     DrawnResources.cpp
-    FontSkia.cpp
     ConnectionFromClient.cpp
     ConnectionFromPresentation.cpp
     ConnectionFromWebContent.cpp
-    OpenGLContext.cpp
-    PaintingSurface.cpp
     PresentableSurface.cpp
     RenderClockConnection.cpp
-    SkiaBackendContext.cpp
-    SkiaUtils.cpp
     VideoFrameHolds.cpp
-    VideoFrameSkia.cpp
     VSyncScheduler.cpp
     WindowServer.cpp
 )
@@ -53,6 +42,27 @@ if (ENABLE_THORVG_RASTERIZER)
     target_compile_definitions(compositorservice PUBLIC ENABLE_THORVG_RASTERIZER=1)
 endif()
 
+if (ENABLE_SKIA)
+    target_sources(compositorservice PRIVATE
+        BitmapExport.cpp
+        Canvas2DCommandPlayer.cpp
+        CanvasHost.cpp
+        ColorSpaceSkia.cpp
+        DisplayListPlayerSkia.cpp
+        DisplayListRasterCache.cpp
+        FontSkia.cpp
+        OpenGLContext.cpp
+        PaintingSurface.cpp
+        SkiaBackendContext.cpp
+        SkiaUtils.cpp
+        VideoFrameSkia.cpp
+    )
+    target_link_libraries(compositorservice PRIVATE skia)
+else()
+    target_sources(compositorservice PRIVATE PaintingSurfaceCPU.cpp)
+    target_compile_definitions(compositorservice PUBLIC LADYBIRD_CPU_ONLY=1)
+endif()
+
 add_executable(Compositor main.cpp)
 
 if (LINUX)
@@ -69,7 +79,7 @@ target_include_directories(compositorservice PRIVATE ${LADYBIRD_SOURCE_DIR}/Serv
 target_link_libraries(Compositor PRIVATE compositorservice LibCore LibGfx LibMain LibPlatformFeatures LibSandbox)
 # ANGLE must precede Skia so macOS GLES symbols bind to ANGLE rather than the
 # OpenGL framework pulled in by Skia.
-target_link_libraries(compositorservice PRIVATE LibCore LibGfx LibImageDecoderClient LibIPC LibMedia LibCompositing compositor_core ${ANGLE_TARGETS} skia)
+target_link_libraries(compositorservice PRIVATE LibCore LibGfx LibImageDecoderClient LibIPC LibMedia LibCompositing compositor_core ${ANGLE_TARGETS})
 
 if ((LINUX OR BSD) AND NOT BUILD_SHARED_LIBS)
     target_link_options(compositorservice INTERFACE LINKER:--allow-multiple-definition)
@@ -90,7 +100,10 @@ if (USE_VULKAN_DMABUF_IMAGES)
 endif()
 
 if (APPLE)
-    target_sources(compositorservice PRIVATE CoreAnimationWindowServer.mm MainDispatchQueue.mm VideoFrameSkia.mm)
+    if (ENABLE_SKIA)
+        target_sources(compositorservice PRIVATE CoreAnimationWindowServer.mm VideoFrameSkia.mm)
+    endif()
+    target_sources(compositorservice PRIVATE MainDispatchQueue.mm)
     target_link_libraries(compositorservice PUBLIC "-framework AVFoundation" "-framework CoreGraphics" "-framework CoreMedia" "-framework CoreVideo" "-framework QuartzCore")
 endif()
 

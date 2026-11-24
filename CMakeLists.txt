@@ -136,7 +136,9 @@ if (ENABLE_GUI_TARGETS)
 
     include(check_skia_confinement)
     set(processes_without_skia ${ladybird_helper_processes} ladybird WebDriver)
-    list(REMOVE_ITEM processes_without_skia Compositor)
+    if (ENABLE_SKIA)
+        list(REMOVE_ITEM processes_without_skia Compositor)
+    endif()
     ladybird_check_skia_confinement(${processes_without_skia})
 endif()
 

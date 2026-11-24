@@ -225,3 +225,7 @@ if (ENABLE_INSTALL_HEADERS)
         install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${header}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${subdirectory}")
     endforeach()
 endif()
+
+if (NOT ENABLE_SKIA)
+    set_property(SOURCE Application.cpp APPEND PROPERTY COMPILE_DEFINITIONS LADYBIRD_CPU_ONLY=1)
+endif()

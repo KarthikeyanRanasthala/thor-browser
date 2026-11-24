@@ -27,6 +27,7 @@ from Utils.host_platform import Platform  # noqa: E402
 # The features of vcpkg.json, with the CMake options and their defaults. All options for a feature must be on
 # to select it. Keep in sync with Meta/CMake/environment.cmake.
 MANIFEST_FEATURE_OPTIONS = {
+    "skia-renderer": {"ENABLE_SKIA": True},
     "qt": {"LADYBIRD_BUILD_QT": False, "ENABLE_GUI_TARGETS": True},
     "sparkle": {"LADYBIRD_ENABLE_UPDATE_CHECK": True, "LADYBIRD_ENABLE_SPARKLE": True},
 }
@@ -43,6 +44,8 @@ def vcpkg_type(preset: str) -> str:
     presets_path = LADYBIRD_SOURCE_DIR / "Meta" / "CMake" / "presets" / "CMakeBasePresets.json"
     with open(presets_path, "r") as presets_file:
         presets = json.load(presets_file)["configurePresets"]
+    if preset == "ThorVG":
+        preset = "Release"
     for entry in presets:
         if entry["name"] == f"{preset}_base":
             return entry["cacheVariables"]["LADYBIRD_VCPKG_TYPE"]
@@ -171,15 +174,16 @@ def cmake_option_is_on(cache: str, option: str, default: bool) -> bool:
     return value not in ("", "0", "OFF", "NO", "FALSE", "N", "IGNORE", "NOTFOUND") and not value.endswith("-NOTFOUND")
 
 
-def manifest_feature_arguments(build_dir: Path) -> list[str]:
+def manifest_feature_arguments(build_dir: Path, preset: str) -> list[str]:
     # Only a build directory that CMake configured before has options to go by.
     cache_path = build_dir / "CMakeCache.txt"
     cache = cache_path.read_text() if cache_path.exists() else ""
 
+    disabled_by_preset = {"ENABLE_SKIA", "LADYBIRD_ENABLE_SPARKLE"} if preset == "ThorVG" else set()
     return [
         f"--x-feature={feature}"
         for feature, options in MANIFEST_FEATURE_OPTIONS.items()
-        if all(cmake_option_is_on(cache, option, default) for option, default in options.items())
+        if all(cmake_option_is_on(cache, option, default and option not in disabled_by_preset) for option, default in options.items())
     ]
 
 
@@ -552,7 +556,7 @@ def build_dependencies(
         write_if_changed(extra_vcpkg_variables_path(build_dir), extra_vcpkg_variables(platform, cc, cxx))
 
         # CMake can rewrite its cache while this runs, so everything below goes by one reading of the features.
-        feature_arguments = manifest_feature_arguments(build_dir)
+        feature_arguments = manifest_feature_arguments(build_dir, preset)
 
         manifest_arguments = vcpkg_install_arguments(vcpkg, triplet, preset)
         manifest_arguments.extend(feature_arguments)

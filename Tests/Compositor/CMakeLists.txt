@@ -1,28 +1,34 @@
 ladybird_test_suite(Compositor)
 
-set(TEST_SOURCES
-    TestBitmapExport.cpp
-    TestCanvas2DCommandPlayer.cpp
-    TestCanvasSurfaceRegistry.cpp
-    TestVideoFrameHolds.cpp
-    TestVSyncScheduler.cpp
-)
+if (ENABLE_SKIA)
+    set(TEST_SOURCES
+        TestBitmapExport.cpp
+        TestCanvas2DCommandPlayer.cpp
+        TestCanvasSurfaceRegistry.cpp
+        TestVideoFrameHolds.cpp
+        TestVSyncScheduler.cpp
+    )
 
-# These drive Skia directly, and the compositor keeps its Skia dependency private.
-list(APPEND TEST_SOURCES
-    TestForceDarkImageFilter.cpp
-    TestPaintingSurface.cpp
-    TestYUVData.cpp
-)
+    # These drive Skia directly, and the compositor keeps its Skia dependency private.
+    list(APPEND TEST_SOURCES
+        TestForceDarkImageFilter.cpp
+        TestPaintingSurface.cpp
+        TestYUVData.cpp
+    )
 
+    if (APPLE)
+        list(APPEND TEST_SOURCES TestVideoSurfaceImage.mm)
+        target_link_libraries(TestCompositor PRIVATE "-framework CoreVideo")
+    endif()
+
+    target_link_libraries(TestCompositor PRIVATE skia)
+else()
+    set(TEST_SOURCES TestCanvasSurfaceRegistry.cpp TestVideoFrameHolds.cpp TestVSyncScheduler.cpp)
+endif()
 if (ENABLE_THORVG_RASTERIZER)
-    list(APPEND TEST_SOURCES TestDisplayListPlayerThorVG.cpp)
+    ladybird_test("" "Compositor" NAME "TestThorVGPainter")
+    target_sources(TestThorVGPainter PRIVATE TestDisplayListPlayerThorVG.cpp)
+    target_link_libraries(TestThorVGPainter PRIVATE compositorservice LibCompositing LibGfx)
 endif()
-
-if (APPLE)
-    list(APPEND TEST_SOURCES TestVideoSurfaceImage.mm)
-    target_link_libraries(TestCompositor PRIVATE "-framework CoreVideo")
-endif()
-
 target_sources(TestCompositor PRIVATE ${TEST_SOURCES})
-target_link_libraries(TestCompositor PRIVATE compositorservice LibCompositing LibGfx skia)
+target_link_libraries(TestCompositor PRIVATE compositorservice LibCompositing LibGfx)
