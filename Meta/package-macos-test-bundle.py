@@ -333,7 +333,9 @@ def write_disk_image(app: Path, output: Path, build_directory: Path) -> None:
         work = Path(temporary)
         contents = work / "contents"
         contents.mkdir()
-        subprocess.run(["ditto", app, contents / f"{name}.app"], check=True)
+        staged_app = contents / f"{name}.app"
+        subprocess.run(["ditto", "--norsrc", "--noextattr", app, staged_app], check=True)
+        subprocess.run(["codesign", "--verify", "--deep", "--strict", staged_app], check=True)
         (contents / "Applications").symlink_to("/Applications")
         if info["CFBundleIdentifier"] in {"sh.karthikeyan.thor-browser", "sh.karthikeyan.thor-browser.gl"}:
             sources = contents / "Sources"
@@ -360,13 +362,12 @@ def write_disk_image(app: Path, output: Path, build_directory: Path) -> None:
                 "in vcpkg-configuration.json before building the dependencies.\n",
                 encoding="utf-8",
             )
-        # Build the HFS+ filesystem without attaching a disk device, including on headless runners.
-        raw_image = work / "filesystem.dmg"
-        subprocess.run(
-            ["hdiutil", "makehybrid", "-hfs", "-hfs-volume-name", name, "-o", raw_image, contents], check=True
-        )
+        # The HFS hybrid writer adds FinderInfo to signed helpers. APFS preserves the clean bundle.
         image = work / "compressed.dmg"
-        subprocess.run(["hdiutil", "convert", raw_image, "-format", "UDZO", "-o", image], check=True)
+        subprocess.run(
+            ["hdiutil", "create", "-srcfolder", contents, "-volname", name, "-fs", "APFS", "-format", "UDZO", image],
+            check=True,
+        )
         subprocess.run(["hdiutil", "verify", image], check=True)
         image.replace(output)
 
