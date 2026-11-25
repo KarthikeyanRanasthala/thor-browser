@@ -364,15 +364,14 @@ The macOS runners build and test DMGs only for pushes to branches named `thor-br
    ```
 
 3. Wait for **Actions → Thor Browser macOS builds** to pass. The macOS 26 jobs build each variant, run the painter tests, and package the DMGs. CTest skips the GL framebuffer test when the runner lacks an accelerated pixel format. Packaging checks each binary’s arm64 deployment target. A macOS 15 job mounts both DMGs and loads a local test document headlessly.
-4. Tag the tested commit with the same version and push the tag while its build artifacts are available:
+4. Publish from the same release branch. Supply the full SHA of the successful push build and a Markdown file containing your release notes.
 
    ```sh
-   git fetch origin refs/heads/thor-browser-release-v0.1.0
-   git tag -a thor-browser-v0.1.0 FETCH_HEAD -m "Thor Browser 0.1.0"
-   git push origin refs/tags/thor-browser-v0.1.0
+   gh workflow run thorvg.yml --repo OWNER/REPO --ref thor-browser-release-v0.1.0 \
+     -f commit=FULL_TESTED_COMMIT_SHA -F notes=@release-notes.md
    ```
 
-5. The tag starts a Linux job that verifies the branch and commit, then publishes the two tested DMGs and `SHA256SUMS` on one GitHub Release. If the tag arrives before the branch build finishes, rerun the publish job after the build passes. To verify your downloads, put all three files in one directory and run `shasum -a 256 -c SHA256SUMS`.
+5. The Linux publish job verifies that the commit passed on that release branch, creates the matching tag, and publishes the two tested DMGs and `SHA256SUMS`. To verify your downloads, put all three files in one directory and run `shasum -a 256 -c SHA256SUMS`.
 
 ### Building with limited system memory
 
