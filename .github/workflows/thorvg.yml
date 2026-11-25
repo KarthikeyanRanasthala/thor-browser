@@ -3,18 +3,27 @@ name: Thor Browser macOS builds
 on:
   push:
     branches: ['thor-browser-release-v*']
-    tags: ['thor-browser-v*']
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full commit SHA from a successful build on this release branch
+        required: true
+        type: string
+      notes:
+        description: Release notes in Markdown
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: thor-browser-release-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  group: thor-browser-release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   build:
-    if: github.ref_type == 'branch' && !github.event.deleted
+    if: github.event_name == 'push' && !github.event.deleted
     name: Thor Browser macOS arm64 / ${{ matrix.preset }}
     runs-on: macos-26
     strategy:
@@ -145,7 +154,7 @@ jobs:
 
   release:
     name: Publish Thor Browser release
-    if: github.ref_type == 'tag' && !github.event.deleted
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/thor-browser-release-v')
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -153,22 +162,17 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      TESTED_COMMIT: ${{ inputs.commit }}
+      RELEASE_NOTES: ${{ inputs.notes }}
     steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          sparse-checkout: .github/workflows
-
       - name: Find the tested release build
         id: build
         run: |
-          branch="thor-browser-release-${GITHUB_REF_NAME#thor-browser-}"
-          commit=$(git rev-parse HEAD)
-          run_id=$(gh run list --workflow thorvg.yml --event push --branch "$branch" \
-            --commit "$commit" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          [[ "$TESTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          run_id=$(gh run list --workflow thorvg.yml --event push --branch "$GITHUB_REF_NAME" \
+            --commit "$TESTED_COMMIT" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
           if [[ -z "$run_id" ]]; then
-            echo "::error::No successful build of $commit on $branch. Once that build passes, re-run this job."
+            echo "::error::No successful push build of $TESTED_COMMIT on $GITHUB_REF_NAME."
             exit 1
           fi
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
@@ -189,9 +193,12 @@ jobs:
           for image in "${images[@]}"; do test -s "$image"; done
           sha256sum "${images[@]}" > SHA256SUMS
 
-          tag=$GITHUB_REF_NAME
+          tag="thor-browser-${GITHUB_REF_NAME#thor-browser-release-}"
+          if ! gh api "repos/$GH_REPO/git/ref/tags/$tag" --silent 2>/dev/null; then
+            gh api --method POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$TESTED_COMMIT" --silent
+          fi
           remote_commit=$(gh api "repos/$GH_REPO/commits/refs/tags/$tag" --jq '.sha')
-          if [[ "$remote_commit" != "$(git rev-parse HEAD)" ]]; then
+          if [[ "$remote_commit" != "$TESTED_COMMIT" ]]; then
             echo "::error::The tag no longer points to the tested commit."
             exit 1
           fi
@@ -201,7 +208,7 @@ jobs:
               exit 0
             fi
           else
-            gh release create "$tag" --draft --verify-tag --title "Thor Browser ${tag#thor-browser-v}" --generate-notes --notes "Published by KarthikeyanRanasthala independently of the Ladybird Browser Initiative. Each disk image includes the matching LGPL sources in Sources/."
+            printf '%s\n' "$RELEASE_NOTES" | gh release create "$tag" --draft --verify-tag --title "Thor Browser ${tag#thor-browser-v}" --notes-file -
           fi
           gh release upload "$tag" "${images[@]}" SHA256SUMS --clobber
-          gh release edit "$tag" --draft=false --verify-tag
+          printf '%s\n' "$RELEASE_NOTES" | gh release edit "$tag" --draft=false --verify-tag --notes-file -
