@@ -1,3 +1,5 @@
+<img src="UI/Icons/thor-browser/app_icon.iconset/icon_128x128@2x.png" width="128" height="128" alt="Thor Browser’s red phalarope mascot">
+
 # Thor Browser
 
 Thor Browser is based on Ladybird and uses ThorVG for page rendering. Published by KarthikeyanRanasthala independently of the Ladybird Browser Initiative.
@@ -5,6 +7,10 @@ Thor Browser is based on Ladybird and uses ThorVG for page rendering. Published 
 [Download Thor Browser for Apple Silicon](https://github.com/KarthikeyanRanasthala/thor-browser/releases/latest) · [Installation and build instructions](Documentation/BuildInstructionsLadybird.md#installing-and-publishing-the-thorvg-macos-builds)
 
 [Project decisions, test results, and next steps](Documentation/ThorBrowserDecisions.md)
+
+## About the logo
+
+Thor Browser takes its name from ThorVG, the library that paints its pages. The red phalarope caught our eye because its Icelandic name, *þórshani*, echoes Thor. The app icon shows its head and body in close-up so you can still recognize it at Dock size.
 
 ## About upstream Ladybird
 
