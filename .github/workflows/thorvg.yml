@@ -2,25 +2,21 @@ name: Thor Browser macOS builds
 
 on:
   push:
-    branches: [master]
-    tags: ['thorvg-v*']
-  pull_request:
-  workflow_dispatch:
+    branches: ['thor-browser-release-v*']
+    tags: ['thor-browser-v*']
 
 permissions:
   contents: read
 
 concurrency:
-  group: thorvg-${{ github.event.pull_request.number || github.ref }}
+  group: thor-browser-release-${{ github.ref }}
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
   build:
-    if: github.event_name != 'push' || !github.event.deleted
+    if: github.ref_type == 'branch' && !github.event.deleted
     name: Thor Browser macOS arm64 / ${{ matrix.preset }}
     runs-on: macos-26
-    outputs:
-      commit: ${{ steps.checkout.outputs.commit }}
     strategy:
       fail-fast: false
       matrix:
@@ -38,7 +34,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7.0.1
-        id: checkout
         with:
           persist-credentials: false
 
@@ -110,7 +105,6 @@ jobs:
   test-release-images:
     name: Test Thor Browser disk images on macOS 15
     needs: build
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/thorvg-v') && !github.event.deleted
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -151,13 +145,38 @@ jobs:
 
   release:
     name: Publish Thor Browser release
-    needs: [build, test-release-images]
+    if: github.ref_type == 'tag' && !github.event.deleted
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/workflows
+
+      - name: Find the tested release build
+        id: build
+        run: |
+          branch="thor-browser-release-${GITHUB_REF_NAME#thor-browser-}"
+          commit=$(git rev-parse HEAD)
+          run_id=$(gh run list --workflow thorvg.yml --event push --branch "$branch" \
+            --commit "$commit" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [[ -z "$run_id" ]]; then
+            echo "::error::No successful build of $commit on $branch. Once that build passes, re-run this job."
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.build.outputs.run_id }}
           pattern: Thor-Browser-macOS-arm64-*.dmg
           path: images
           merge-multiple: true
@@ -165,19 +184,15 @@ jobs:
 
       - name: Publish both disk images
         working-directory: images
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          BUILT_COMMIT: ${{ needs.build.outputs.commit }}
         run: |
           images=(Thor-Browser-macOS-arm64-ThorVG.dmg Thor-Browser-macOS-arm64-ThorVGGL.dmg)
           for image in "${images[@]}"; do test -s "$image"; done
           sha256sum "${images[@]}" > SHA256SUMS
 
           tag=$GITHUB_REF_NAME
-          remote_commit=$(gh api "repos/$GH_REPO/commits/$tag" --jq '.sha')
-          if [[ "$remote_commit" != "$BUILT_COMMIT" ]]; then
-            echo "::error::The tag no longer points to the commit built by this run."
+          remote_commit=$(gh api "repos/$GH_REPO/commits/refs/tags/$tag" --jq '.sha')
+          if [[ "$remote_commit" != "$(git rev-parse HEAD)" ]]; then
+            echo "::error::The tag no longer points to the tested commit."
             exit 1
           fi
           if draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
@@ -186,7 +201,7 @@ jobs:
               exit 0
             fi
           else
-            gh release create "$tag" --draft --verify-tag --title "Thor Browser ${tag#thorvg-v}" --generate-notes --notes "Published by KarthikeyanRanasthala independently of the Ladybird Browser Initiative. Each disk image includes the matching LGPL sources in Sources/."
+            gh release create "$tag" --draft --verify-tag --title "Thor Browser ${tag#thor-browser-v}" --generate-notes --notes "Published by KarthikeyanRanasthala independently of the Ladybird Browser Initiative. Each disk image includes the matching LGPL sources in Sources/."
           fi
           gh release upload "$tag" "${images[@]}" SHA256SUMS --clobber
           gh release edit "$tag" --draft=false --verify-tag

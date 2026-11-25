@@ -354,18 +354,25 @@ Both disk images include a `Sources` folder with the corresponding LGPL library 
 
 These Apple Silicon builds inherit Ladybird’s macOS deployment target, currently 14.4. The disk image preserves the app bundle, its executable permissions, and its libraries. Each variant has its own bundle identifier and profile directory under `~/Library/Application Support/`, named after the app. You can install both alongside the official `Ladybird.app`. Each starts with a fresh profile. The builds are ad hoc signed and lack Apple notarization, so Gatekeeper may block the first launch of a downloaded app.
 
-The [Thor Browser macOS builds workflow](../.github/workflows/thorvg.yml) uploads both DMGs as Actions artifacts on pushes to `master`, pull requests, and manual runs. For long-lived downloads, publish a tagged release:
+The macOS runners build and test DMGs only for pushes to branches named `thor-browser-release-v*`. Publishing uses the DMGs from that build. [Thor Browser macOS builds workflow](../.github/workflows/thorvg.yml)
 
 1. Enable Actions on your fork. To lock published tags and assets, enable **Settings → General → Releases → Enable release immutability** before the first release. [GitHub release immutability](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)
-2. Tag the commit you want to publish. For example, with a Git remote named `fork` pointing at your repository:
+2. Push the release candidate to its versioned branch. For example, to build version 0.1.0 from your current commit on a fork named `origin`:
 
    ```sh
-   git tag -a thorvg-v0.1.0 -m "ThorVG 0.1.0"
-   git push fork refs/tags/thorvg-v0.1.0
+   git push origin HEAD:refs/heads/thor-browser-release-v0.1.0
    ```
 
-3. Watch **Actions → Thor Browser macOS builds**. A `thorvg-v*` tag push builds both variants on macOS 26 and runs the painter tests. CTest skips the GL framebuffer test when the runner lacks an accelerated pixel format. Packaging checks each binary’s arm64 deployment target. A macOS 15 job mounts both DMGs and loads a local test document headlessly using software painting.
-4. Once these checks pass, the workflow publishes both images and `SHA256SUMS` on one GitHub Release using the repository’s workflow token. To verify both downloads, put all three files in one directory and run `shasum -a 256 -c SHA256SUMS`. You can rerun a failed release job to complete its draft. Use a new version tag for a subsequent release.
+3. Wait for **Actions → Thor Browser macOS builds** to pass. The macOS 26 jobs build each variant, run the painter tests, and package the DMGs. CTest skips the GL framebuffer test when the runner lacks an accelerated pixel format. Packaging checks each binary’s arm64 deployment target. A macOS 15 job mounts both DMGs and loads a local test document headlessly.
+4. Tag the tested commit with the same version and push the tag while its build artifacts are available:
+
+   ```sh
+   git fetch origin refs/heads/thor-browser-release-v0.1.0
+   git tag -a thor-browser-v0.1.0 FETCH_HEAD -m "Thor Browser 0.1.0"
+   git push origin refs/tags/thor-browser-v0.1.0
+   ```
+
+5. The tag starts a Linux job that verifies the branch and commit, then publishes the two tested DMGs and `SHA256SUMS` on one GitHub Release. If the tag arrives before the branch build finishes, rerun the publish job after the build passes. To verify your downloads, put all three files in one directory and run `shasum -a 256 -c SHA256SUMS`.
 
 ### Building with limited system memory
 

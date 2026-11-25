@@ -20,7 +20,7 @@ Use the Icelandic red phalarope (þórshani) as the mascot. The approved icon is
 
 Retain Ladybird's BSD notice, ThorVG's MIT notice, and the FreeType acknowledgment for the CPU rasterizer present in both builds. Identify KarthikeyanRanasthala as the publisher and make independence from the Ladybird Browser Initiative clear. Each DMG carries its own matching LGPL library sources, patches, build recipes, and instructions under `Sources/`. Check the notices and sources again when updating dependencies. [Ladybird trademark policy](https://ladybird.org/trademark/)
 
-Use the **Thor Browser macOS builds** workflow for both variants. Ordinary CI runs produce installable DMGs. For lasting distribution, an explicit `thorvg-v*` tag runs the additional macOS 15 smoke test and publishes both images and their checksums to GitHub Releases. A normal push does not create a release. See [installation and release instructions](BuildInstructionsLadybird.md#installing-and-publishing-the-thorvg-macos-builds).
+Reserve macOS runners for pushes to versioned release branches such as `thor-browser-release-v0.1.0`. Each push builds both DMGs and smoke-tests them on macOS 15. Push the matching tag (`thor-browser-v0.1.0`) to publish the artifacts from the successful build of that exact commit. Publishing runs on Linux. [Installation and release instructions](BuildInstructionsLadybird.md#installing-and-publishing-the-thorvg-macos-builds)
 
 ## Evidence and where to resume
 
