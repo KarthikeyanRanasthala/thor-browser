@@ -2,7 +2,7 @@
 
 Thor Browser is based on Ladybird and uses ThorVG for page rendering. Published by KarthikeyanRanasthala independently of the Ladybird Browser Initiative.
 
-[Install or build Thor Browser on macOS](Documentation/BuildInstructionsLadybird.md#installing-and-publishing-the-thorvg-macos-builds).
+[Download Thor Browser for Apple Silicon](https://github.com/KarthikeyanRanasthala/thor-browser/releases/latest) · [Installation and build instructions](Documentation/BuildInstructionsLadybird.md#installing-and-publishing-the-thorvg-macos-builds)
 
 [Project decisions, test results, and next steps](Documentation/ThorBrowserDecisions.md)
 
